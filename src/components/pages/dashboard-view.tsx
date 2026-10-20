@@ -4,8 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic';
 import { AttachmentItem, attachmentFileUrl, formatSize, typeIcon } from '@/components/attachment-utils';
 import LangButton from '@/components/lang-button';
-import { SmmSpecialistDock } from '@/components/pages/smm-requests-view';
-import { SmmCustomerDock } from '@/components/pages/smm-roles-view-dock';
+import { SmmSpecialistDock, SmmCustomerDock } from '@/components/pages/smm-roles-view-dock';
 import { useSmmStore } from '@/stores/smm-store';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -148,7 +147,7 @@ export interface DashboardViewProps {
   mySmmRole: 'customer' | 'specialist';
   openSmmWizard: (mode: 'invite' | 'apply' | 'send', target: any) => void;
   toggleSmmBookmark: (kind: 'specialist' | 'event', id: string) => void;
-  gotoSmmPage: (p: 'smm-events' | 'smm-inbox' | 'smm-requests' | 'smm-roles') => void;
+  gotoSmmPage: (p: 'smm-events' | 'smm-inbox' | 'smm-requests' | 'smm-roles' | 'smm-mail' | 'smm-library') => void;
   // The specialist's «+» opens the ЗАПРОС editor; «изменить» routes to the
   // «Отправленные запросы» page with its edit mode on; the account switcher
   // cycles заказчик ↔ SMM-специалист (the language-button look).
@@ -1153,6 +1152,23 @@ export default function DashboardView({
           </div>
         </header>
 
+        {/* ── SCOPE SEGMENT — «Личное» | «Общее»: the dashboard's own content
+        switch (the SMM feed scope + the tests library scope together, like
+        the old tests site's very-bottom pair). It lives INSIDE the page now —
+        the bottom dock carries only the four PAGE tabs. ── */}
+        {effectiveUser && !viewingUser && !filesFeedMode && !treeFeedMode && !gridFilesMode && !gridTreeMode && (
+          <div className="shrink-0 z-30 bg-background/95 backdrop-blur-md border-b border-black/5">
+            <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 flex gap-2">
+              <button type="button" onClick={() => gotoLibraryMode(false)} className={`min-w-0 flex items-center justify-center gap-1.5 h-8 px-3 rounded-full border-2 text-xs sm:text-[13px] font-semibold transition-colors ${!discoverMode ? 'bg-primary text-white border-primary shadow-md' : 'border-black/15 bg-white hover:bg-muted/50'}`}>
+                <Library className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{t('modeMine')}</span>
+              </button>
+              <button type="button" onClick={() => gotoLibraryMode(true)} className={`min-w-0 flex items-center justify-center gap-1.5 h-8 px-3 rounded-full border-2 text-xs sm:text-[13px] font-semibold transition-colors ${discoverMode ? 'bg-primary text-white border-primary shadow-md' : 'border-black/15 bg-white hover:bg-muted/50'}`}>
+                <Compass className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{t('modeDiscover')}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeLen === 0 && viewingLoading ? (
           <main className="flex-1 min-h-0 flex items-center justify-center">
             <p className="text-sm text-muted-foreground flex items-center gap-2">
@@ -2043,49 +2059,22 @@ export default function DashboardView({
             className="max-w-2xl mx-auto px-3 sm:px-4 pt-2"
             style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
           >
-            {effectiveUser && smmActive ? (
-              mySmmRole === 'specialist' ? (
-                <SmmSpecialistDock
-                  lang={lang}
-                  active={discoverMode ? 'public' : 'library'}
-                  gotoLibrary={(d: boolean) => gotoLibraryMode(d)}
-                  gotoInbox={() => gotoSmmPage('smm-inbox')}
-                  gotoRequests={() => gotoSmmPage('smm-requests')}
-                />
-              ) : (
-                <SmmCustomerDock
-                  lang={lang}
-                  active={discoverMode ? 'public' : 'library'}
-                  gotoLibrary={(d: boolean) => gotoLibraryMode(d)}
-                  gotoEvents={() => gotoSmmPage('smm-events')}
-                  gotoRoles={(scope) => { useSmmStore.getState().setRolesScopeRequest(scope); gotoSmmPage('smm-roles'); }}
-                />
-              )
+            {effectiveUser && mySmmRole === 'specialist' ? (
+              <SmmSpecialistDock
+                lang={lang}
+                active={null}
+                gotoLibrary={(scope: 'mine' | 'discover') => { useSmmStore.getState().setLibraryScope(scope); gotoSmmPage('smm-library'); }}
+                gotoInbox={() => gotoSmmPage('smm-inbox')}
+                gotoRequests={() => gotoSmmPage('smm-requests')}
+              />
             ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => gotoLibraryMode(false)}
-                  disabled={loading}
-                  title={`${t('modeMine')} · ${t('modeMineHint')}`}
-                  aria-label={t('modeMine')}
-                  className={`min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${(!discoverMode && !viewingUser) ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`}
-                >
-                  <Library className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-                  <span className="min-w-0 truncate">{t('modeMine')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => gotoLibraryMode(true)}
-                  disabled={loading}
-                  title={`${t('modeDiscover')} · ${t('modeDiscoverHint')}`}
-                  aria-label={t('modeDiscover')}
-                  className={`min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${discoverMode ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`}
-                >
-                  <Compass className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-                  <span className="min-w-0 truncate">{t('modeDiscover')}</span>
-                </button>
-              </div>
+              <SmmCustomerDock
+                lang={lang}
+                active={null}
+                gotoEvents={() => gotoSmmPage('smm-events')}
+                gotoRoles={(scope) => { useSmmStore.getState().setRolesScopeRequest(scope); gotoSmmPage('smm-roles'); }}
+                gotoMail={() => gotoSmmPage('smm-mail')}
+              />
             )}
           </div>
         </div>

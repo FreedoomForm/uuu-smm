@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ResizableSheetFrame } from '@/components/resize-sheet';
 import SmmEventSlide, { SmmEventGridCard } from '@/components/pages/smm-event-slide';
-import { SmmEventsDock } from '@/components/pages/smm-roles-view-dock';
+import { SmmCustomerDock } from '@/components/pages/smm-roles-view-dock';
 import { api } from '@/lib/api';
 import { uploadSmmFile, sniffType } from '@/lib/smm-client';
 import { useSessionStore } from '@/stores/session-store';
@@ -64,8 +64,9 @@ export interface SmmEventsViewProps {
   onOpenOtherEvent: (o: any) => void;
   onOpenProfilePage: () => void;
   onCycleLang: () => void;
-  // The dock's «Личные роли | Общие роли» router
+  // The dock's page tabs router: Личные/Общие роли + Почта
   onGotoRoles?: (scope: 'mine' | 'public') => void;
+  onGotoMail?: () => void;
 }
 
 function FeedArrows({ onPrev, onNext, canPrev, canNext, prevLabel, nextLabel }: {
@@ -84,7 +85,7 @@ export default function SmmEventsView({
   user, myAvatar, events, eventsLoading, pinnedEventIds, scope, onScopeChange,
   focusEventId, goHome, onCreateEvent, onEditEvent, onDeleteEvent, onShareEvent, onPublicEvent,
   onInvite, onChat, onFiles, onToggleBookmark, onOpenProfileUser,
-  onOpenOtherEvent, onOpenProfilePage, onCycleLang, onGotoRoles,
+  onOpenOtherEvent, onOpenProfilePage, onCycleLang, onGotoRoles, onGotoMail,
 }: SmmEventsViewProps) {
   const lang = useSessionStore(s => s.lang);
   const t = React.useCallback((key: string, vars?: Record<string, string | number>) => tUI(lang, key, vars), [lang]);
@@ -355,6 +356,19 @@ export default function SmmEventsView({
         </div>
       </header>
 
+      {/* ── SCOPE SEGMENT — «Личное» (own + pinned) | «Общее» (the general
+          library): the page's own content switch; the dock stays page tabs ── */}
+      <div className="shrink-0 z-30 bg-background/95 backdrop-blur-md border-b border-black/5">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 flex gap-2">
+          <button type="button" onClick={() => { if (scope !== 'mine') onScopeChange('mine'); }} className={`min-w-0 flex items-center justify-center gap-1.5 h-8 px-3 rounded-full border-2 text-xs sm:text-[13px] font-semibold transition-colors ${scope === 'mine' ? 'bg-primary text-white border-primary shadow-md' : 'border-black/15 bg-white hover:bg-muted/50'}`}>
+            <Library className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{t('modeMine')}</span>
+          </button>
+          <button type="button" onClick={() => { if (scope !== 'discover') onScopeChange('discover'); }} className={`min-w-0 flex items-center justify-center gap-1.5 h-8 px-3 rounded-full border-2 text-xs sm:text-[13px] font-semibold transition-colors ${scope === 'discover' ? 'bg-primary text-white border-primary shadow-md' : 'border-black/15 bg-white hover:bg-muted/50'}`}>
+            <Compass className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{t('modeDiscover')}</span>
+          </button>
+        </div>
+      </div>
+
       {/* ── CONTENT — the same three views as the dashboard ── */}
       {len === 0 && (eventsLoading || !user) ? (
         /* FIRST-DATA SKELETON — the same placeholder card the dashboard
@@ -459,19 +473,19 @@ export default function SmmEventsView({
         </div>
       )}
 
-      {/* ── LIBRARY PAGES DOCK — the same very-bottom panel as every main
-          page: «Мероприятия» (this page, active) | «Личные роли» | «Общие
-          роли» | the page's own scope toggle (Личное ↔ Общее) ── */}
+      {/* ── LIBRARY PAGES DOCK — the customer's four page tabs: «Мероприятия»
+          (this page, active) | «Личные роли» | «Общие роли» | «Почта» ── */}
       <div className="desktop-dock shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
         <div
           className="max-w-2xl mx-auto px-3 sm:px-4 pt-2"
           style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
         >
-          <SmmEventsDock
+          <SmmCustomerDock
             lang={lang}
-            activeScope={scope}
+            active="events"
+            gotoEvents={() => { /* already here */ }}
             gotoRoles={(rs: 'mine' | 'public') => onGotoRoles?.(rs)}
-            toggleScope={() => onScopeChange(scope === 'mine' ? 'discover' : 'mine')}
+            gotoMail={() => onGotoMail?.()}
           />
         </div>
       </div>

@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { useSessionStore } from '@/stores/session-store';
 import { tUI, type Lang } from '@/lib/i18n';
+import { SmmCustomerDock, SmmSpecialistDock } from '@/components/pages/smm-roles-view-dock';
 
 /**
  * SMM MAIL — «Почта», the shared requests hub for BOTH account kinds. It
@@ -44,18 +45,20 @@ export interface SmmMailViewProps {
   onOpenProfilePage: () => void;
   onCycleLang: () => void;
   onSwitchRole: () => void;
-  // The uniform main dock (Личные роли/Почта | Общие роли | Личное | Общее)
-  onGotoMyRoles: () => void;
-  onGotoSharedRoles: () => void;
-  onGotoLibraryMine: () => void;
-  onGotoLibraryDiscover: () => void;
+  // The uniform page-tab docks (customer: Мероприятия | Личные роли |
+  // Общие роли | Почта; specialist: the four library/requests tabs)
+  gotoEvents: () => void;
+  gotoRoles: (scope: 'mine' | 'public') => void;
+  gotoLibrary: (scope: 'mine' | 'discover') => void;
+  gotoInbox: () => void;
+  gotoRequests: () => void;
   // Tap an event name on a card → the events page focused on that event
   onOpenEvent?: (eventId: string) => void;
 }
 
 export default function SmmMailView({
   user, myAvatar, mySmmRole, goHome, onOpenProfilePage, onCycleLang, onSwitchRole,
-  onGotoMyRoles, onGotoSharedRoles, onGotoLibraryMine, onGotoLibraryDiscover, onOpenEvent,
+  gotoEvents, gotoRoles, gotoLibrary, gotoInbox, gotoRequests, onOpenEvent,
 }: SmmMailViewProps) {
   const lang = useSessionStore(s => s.lang);
   const t = React.useCallback((key: string, vars?: Record<string, string | number>) => tUI(lang, key, vars), [lang]);
@@ -405,38 +408,32 @@ export default function SmmMailView({
         </div>
       </div>
 
-      {/* ── MAIN DOCK — the same 4 page buttons every page carries:
-          Личные роли/Почта | Общие роли | Личное | Общее ── */}
+      {/* ── MAIN DOCK — the page-tab dock every page carries (one tap = one
+          page): the customer's Мероприятия | Личные роли | Общие роли |
+          Почта (this page, active) — the specialist gets the library/requests
+          tabs (this page ≈ «Принятые запросы») ── */}
       <div className="desktop-dock shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
         <div
           className="max-w-2xl mx-auto px-3 sm:px-4 pt-2"
           style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
         >
-          <div className="grid grid-cols-4 gap-2">
-            {mySmmRole === 'customer' ? (
-              <button type="button" onClick={onGotoMyRoles} title={t('smmMyRolesTitle')} aria-label={t('smmMyRolesTitle')} className={dockBtn + ' border-black bg-white hover:bg-muted/50'}>
-                <Briefcase className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-                <span className="min-w-0 truncate">{t('smmMyRolesTitle')}</span>
-              </button>
-            ) : (
-              <button type="button" disabled title={t('smmMailTitle')} aria-label={t('smmMailTitle')} className={dockBtn + ' bg-cta text-white border-cta shadow-md'}>
-                <Megaphone className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-                <span className="min-w-0 truncate">{t('smmMailTitle')}</span>
-              </button>
-            )}
-            <button type="button" onClick={onGotoSharedRoles} title={t('smmSharedRolesTitle')} aria-label={t('smmSharedRolesTitle')} className={dockBtn + ' border-black bg-white hover:bg-muted/50'}>
-              <Users className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-              <span className="min-w-0 truncate">{t('smmSharedRolesTitle')}</span>
-            </button>
-            <button type="button" onClick={onGotoLibraryMine} title={`${t('modeMine')} · ${t('modeMineHint')}`} aria-label={t('modeMine')} className={dockBtn + ' border-black bg-white hover:bg-muted/50'}>
-              <Library className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-              <span className="min-w-0 truncate">{t('modeMine')}</span>
-            </button>
-            <button type="button" onClick={onGotoLibraryDiscover} title={`${t('modeDiscover')} · ${t('modeDiscoverHint')}`} aria-label={t('modeDiscover')} className={dockBtn + ' border-black bg-white hover:bg-muted/50'}>
-              <Compass className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-              <span className="min-w-0 truncate">{t('modeDiscover')}</span>
-            </button>
-          </div>
+          {mySmmRole === 'customer' ? (
+            <SmmCustomerDock
+              lang={lang}
+              active="mail"
+              gotoEvents={gotoEvents}
+              gotoRoles={gotoRoles}
+              gotoMail={() => { /* already here */ }}
+            />
+          ) : (
+            <SmmSpecialistDock
+              lang={lang}
+              active="inbox"
+              gotoLibrary={gotoLibrary}
+              gotoInbox={() => { /* already here */ }}
+              gotoRequests={gotoRequests}
+            />
+          )}
         </div>
       </div>
 

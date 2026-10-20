@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CreatorStrip } from '@/components/shared-bits';
+import { SmmSpecialistDock } from '@/components/pages/smm-roles-view-dock';
 import { smmCoverColor } from '@/lib/smm-client';
 import { useSessionStore } from '@/stores/session-store';
 import { tUI, type Lang } from '@/lib/i18n';
@@ -62,7 +63,7 @@ export interface SmmRequestsViewProps {
   onOpenProfilePage: () => void;
   onCycleLang: () => void;
   // The dock's page router: personal/public library + the requests pages
-  gotoLibrary: (discover: boolean) => void;
+  gotoLibrary: (scope: 'mine' | 'discover') => void;
   gotoInbox: () => void;
   // The dashboard's «изменить» button routes here with the edit mode ON
   initialEditMode?: boolean;
@@ -428,49 +429,12 @@ export default function SmmRequestsView({
 }
 
 // ---------------------------------------------------------------------------
-// SMM SPECIALIST DOCK — the four page buttons every specialist page renders:
-// Личная библиотека | Публичная библиотека | Принятые запросы | Отправленные
-// запросы. `active` marks the current page (cta fill), like the dashboard's
-// dock does for the personal/public pair.
-// ---------------------------------------------------------------------------
-export function SmmSpecialistDock({
-  lang, active, gotoLibrary, gotoInbox, gotoRequests,
-}: {
-  lang: string;
-  active: 'library' | 'public' | 'inbox' | 'requests';
-  gotoLibrary: (discover: boolean) => void;
-  gotoInbox: () => void;
-  gotoRequests: () => void;
-}) {
-  const t = React.useCallback((key: string, vars?: Record<string, string | number>) => tUI(lang as Lang, key, vars), [lang]);
-  const btn = (isActive: boolean) => `min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${isActive ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`;
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      <button type="button" onClick={() => gotoLibrary(false)} title={`${t('modeMine')} · ${t('modeMineHint')}`} aria-label={t('modeMine')} className={btn(active === 'library')}>
-        <Library className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-        <span className="min-w-0 truncate">{t('modeMine')}</span>
-      </button>
-      <button type="button" onClick={() => gotoLibrary(true)} title={`${t('modeDiscover')} · ${t('modeDiscoverHint')}`} aria-label={t('modeDiscover')} className={btn(active === 'public')}>
-        <Compass className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-        <span className="min-w-0 truncate">{t('modeDiscover')}</span>
-      </button>
-      <button type="button" onClick={gotoInbox} title={t('smmRequestsInTitle')} aria-label={t('smmRequestsInTitle')} className={btn(active === 'inbox')}>
-        <Send className="w-4 h-4 shrink-0 rotate-180 [@media(max-width:479px)]:hidden" />
-        <span className="min-w-0 truncate">{t('smmRequestsInTitle')}</span>
-      </button>
-      <button type="button" onClick={gotoRequests} title={t('smmRequestsTitle')} aria-label={t('smmRequestsTitle')} className={btn(active === 'requests')}>
-        <ListOrdered className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-        <span className="min-w-0 truncate">{t('smmRequestsTitle')}</span>
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // SMM REQUEST SLIDE — the ONE TikTok-style card for a ЗАПРОС. The same ladder
 // every SMM card keeps (the user's rule: identical cards everywhere): профиль
 // + закладки + имя in the creator strip, then Чат → ИИ чат → (own: Ссылка →
 // Общая библиотека → Изменить → Удалить) / (foreign public: Взять шаблон).
+// (The SmmSpecialistDock lives in smm-roles-view-dock.tsx — every specialist
+// page imports the SAME dock from there.)
 // ---------------------------------------------------------------------------
 export interface SmmRequestSlideProps {
   rq: any;

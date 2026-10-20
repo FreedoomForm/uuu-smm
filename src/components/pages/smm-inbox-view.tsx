@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   ArrowLeft, Banknote, Bell, CalendarClock, CheckCircle2, FileText, Inbox,
-  Send, X,
+  Pencil, Plus, Send, X,
 } from 'lucide-react';
 import LangButton from '@/components/lang-button';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { useSessionStore } from '@/stores/session-store';
 import { tUI, type Lang } from '@/lib/i18n';
-import { SmmSpecialistDock } from '@/components/pages/smm-requests-view';
+import { SmmSpecialistDock } from '@/components/pages/smm-roles-view-dock';
 import type { SmmApplicationItem, SmmInvitationItem } from '@/lib/app-types';
 
 /**
@@ -26,13 +26,17 @@ import type { SmmApplicationItem, SmmInvitationItem } from '@/lib/app-types';
 
 export interface SmmInboxViewProps {
   goHome: () => void;
-  // The dock's page router
-  gotoLibrary: (discover: boolean) => void;
+  // The dock's page router: personal/public library + the requests pages
+  gotoLibrary: (scope: 'mine' | 'discover') => void;
   gotoRequests: () => void;
+  // The specialist's «+» opens the ЗАПРОС editor; «изменить» routes to
+  // «Отправленные запросы» in edit mode (D-spec top panel)
+  onCreateRequest?: () => void;
+  onEditRequests?: () => void;
   onCycleLang: () => void;
 }
 
-export default function SmmInboxView({ goHome, gotoLibrary, gotoRequests, onCycleLang }: SmmInboxViewProps) {
+export default function SmmInboxView({ goHome, gotoLibrary, gotoRequests, onCreateRequest, onEditRequests, onCycleLang }: SmmInboxViewProps) {
   const lang = useSessionStore(s => s.lang);
   const t = React.useCallback((key: string, vars?: Record<string, string | number>) => tUI(lang, key, vars), [lang]);
   const [seg, setSeg] = React.useState<'invites' | 'apps'>('invites');
@@ -81,6 +85,16 @@ export default function SmmInboxView({ goHome, gotoLibrary, gotoRequests, onCycl
             {pendingN > 0 && <Badge className="rounded-full bg-amber-500 shrink-0">{pendingN}</Badge>}
           </div>
           <div className="flex items-center gap-1 sm:gap-2 shrink-0 ml-auto">
+            {onCreateRequest && (
+              <Button onClick={onCreateRequest} className="rounded-full bg-primary hover:bg-primary/90 shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm" title={t('smmNewRequest')}>
+                <Plus className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('smmNewRequest')}</span>
+              </Button>
+            )}
+            {onEditRequests && (
+              <Button variant="outline" onClick={onEditRequests} className="rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm border-black" title={t('smmEditRequestTitle')} aria-label={t('smmEditRequestTitle')}>
+                <Pencil className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('gEdit')}</span>
+              </Button>
+            )}
             <LangButton lang={lang as Lang} onChange={onCycleLang} className="border-black px-2 sm:px-3" />
           </div>
         </div>

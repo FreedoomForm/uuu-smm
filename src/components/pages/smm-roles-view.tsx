@@ -58,9 +58,10 @@ export interface SmmRolesViewProps {
   onOpenProfileUser: (u: any) => void;
   onOpenProfilePage: () => void;
   onCycleLang: () => void;
-  // The dock's page router
-  gotoLibrary: (discover: boolean) => void;
+  // The dock's page tabs router: Мероприятия + Почта (the roles tabs switch
+  // the scope of THIS page via onScopeChange)
   gotoEvents: () => void;
+  gotoMail: () => void;
 }
 
 function FeedArrows({ onPrev, onNext, canPrev, canNext, prevLabel, nextLabel }: {
@@ -79,7 +80,7 @@ export default function SmmRolesView({
   user, myAvatar, roles, loading, scope, onScopeChange, myEvents,
   goHome, onCreateEvent, onEditRole, onDeleteRole, onShareRole, onAttachRole,
   onOpenEvent, onChat, onAiChat, onToggleBookmark, onOpenProfileUser,
-  onOpenProfilePage, onCycleLang, gotoLibrary, gotoEvents,
+  onOpenProfilePage, onCycleLang, gotoEvents, gotoMail,
 }: SmmRolesViewProps) {
   const lang = useSessionStore(s => s.lang);
   const t = React.useCallback((key: string, vars?: Record<string, string | number>) => tUI(lang, key, vars), [lang]);
@@ -381,10 +382,10 @@ export default function SmmRolesView({
         >
           <SmmCustomerDock
             lang={lang}
-            active={scope === 'mine' ? 'roles' : 'rolesPublic'}
-            gotoLibrary={gotoLibrary}
+            active={scope === 'mine' ? 'rolesMine' : 'rolesPublic'}
             gotoEvents={gotoEvents}
             gotoRoles={s => onScopeChange(s)}
+            gotoMail={gotoMail}
           />
         </div>
       </div>

@@ -155,6 +155,8 @@ import SmmRequestsView from '@/components/pages/smm-requests-view';
 import SmmRequestEditorView from '@/components/pages/smm-request-editor-view';
 import SmmRequestFillView from '@/components/pages/smm-request-fill-view';
 import SmmRolesView from '@/components/pages/smm-roles-view';
+import SmmLibraryView from '@/components/pages/smm-library-view';
+import SmmMailView from '@/components/pages/smm-mail-view';
 import { useSmmStore, smmNow } from '@/stores/smm-store';
 import { useEventEditorStore, resetEventForm, eventEditorNow } from '@/stores/event-editor-store';
 import { useRequestEditorStore, resetRequestForm, requestEditorNow } from '@/stores/request-editor-store';
@@ -3061,7 +3063,44 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     }
     st.setWizardBusy(false);
   };
-  const gotoSmmPage = (p: 'smm-events' | 'smm-inbox' | 'smm-requests' | 'smm-roles') => setPage(p);
+  const gotoSmmPage = (p: 'smm-events' | 'smm-inbox' | 'smm-requests' | 'smm-roles' | 'smm-mail' | 'smm-library') => setPage(p);
+  // The specialist dock's «Личная | Публичная библиотека» tabs: preset the
+  // scope, then open the library page (real page tabs — one tap, one page).
+  const gotoSmmLibrary = (scope: 'mine' | 'discover') => {
+    useSmmStore.getState().setLibraryScope(scope);
+    setPage('smm-library');
+  };
+
+  // ═══════════════════ LIBRARY (specialist) handlers ══════════════════════
+  // scope=mine → the BOOKMARKED events (закладки мероприятий), discover →
+  // the whole open library. The same kind=events feed the customer's events
+  // page uses — the API returns the right slice for the specialist role.
+  const [libraryItems, setLibraryItems] = useState<any[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const libraryScope = useSmmStore(s => s.libraryScope);
+  const libraryScopeRef = useRef(libraryScope);
+  libraryScopeRef.current = libraryScope;
+  const refreshLibraryFeed = useCallback(async (scopeOverride?: 'mine' | 'discover') => {
+    const st = useSessionStore.getState();
+    const uid = st.user?.id || st.hydratedUser?.id;
+    if (!uid) return;
+    const scope = scopeOverride || libraryScopeRef.current;
+    setLibraryLoading(true);
+    try {
+      const feed = await api.getSmmFeed({ scope, limit: 30, kind: 'events' });
+      setLibraryItems(feed.items || []);
+    } catch { /* transient */ }
+    setLibraryLoading(false);
+  }, []);
+  const changeLibraryScope = useCallback((s2: 'mine' | 'discover') => {
+    useSmmStore.getState().setLibraryScope(s2);
+    libraryScopeRef.current = s2;
+    void refreshLibraryFeed(s2);
+  }, [refreshLibraryFeed]);
+  useEffect(() => {
+    if (effectivePage === 'smm-library' && effectiveUser) void refreshLibraryFeed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectivePage === 'smm-library', effectiveUser?.id, libraryScope]);
 
   // ═════════════════════════ ЗАПРОС handlers ══════════════════════════════
   const refreshRequests = useCallback(async (scopeOverride?: 'mine' | 'public') => {
@@ -5047,6 +5086,7 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
           onOpenProfilePage={() => setPage('profile')}
           onCycleLang={cycleLang}
           onGotoRoles={(rs: 'mine' | 'public') => { useSmmStore.getState().setRolesScopeRequest(rs); setPage('smm-roles'); }}
+          onGotoMail={() => setPage('smm-mail')}
         />
         <AlertDialog open={!!deleteEventId} onOpenChange={() => setDeleteEventId(null)}>
           <AlertDialogContent>
@@ -5070,8 +5110,10 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     return (
       <SmmInboxView
         goHome={() => setPage('dashboard')}
-        gotoLibrary={(discover: boolean) => { if (discover !== navNow().discoverMode) toggleDiscoverMode(); setPage('dashboard'); }}
+        gotoLibrary={gotoSmmLibrary}
         gotoRequests={() => setPage('smm-requests')}
+        onCreateRequest={startCreateRequest}
+        onEditRequests={() => { useSmmStore.getState().setRequestsEditMode(true); setPage('smm-requests'); }}
         onCycleLang={cycleLang}
       />
     );
@@ -5107,7 +5149,7 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
         onOpenProfileUser={(u: any) => openUserLibrary(u)}
         onOpenProfilePage={() => setPage('profile')}
         onCycleLang={cycleLang}
-        gotoLibrary={(discover: boolean) => { if (discover !== navNow().discoverMode) toggleDiscoverMode(); setPage('dashboard'); }}
+        gotoLibrary={gotoSmmLibrary}
         gotoInbox={() => setPage('smm-inbox')}
       />
     );
@@ -5164,8 +5206,67 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
         onOpenProfileUser={(u: any) => openUserLibrary(u)}
         onOpenProfilePage={() => setPage('profile')}
         onCycleLang={cycleLang}
-        gotoLibrary={(discover: boolean) => { if (discover !== navNow().discoverMode) toggleDiscoverMode(); setPage('dashboard'); }}
         gotoEvents={() => setPage('smm-events')}
+        gotoMail={() => setPage('smm-mail')}
+      />
+    );
+  }
+
+  // SMM LIBRARY — the specialist's «Личная библиотека» (my bookmarked
+  // events, each card ready to «Отправить запрос») + «Публичная библиотека»
+  // (the whole open library). The events-page twin with the specialist dock.
+  if (effectivePage === 'smm-library') {
+    return (
+      <SmmLibraryView
+        user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '' } : null}
+        myAvatar={myAvatar}
+        events={libraryItems}
+        loading={libraryLoading}
+        scope={libraryScope}
+        pinnedEventIds={smmBmEvents}
+        focusEventId={focusEventId}
+        goHome={() => setPage('dashboard')}
+        onCreateRequest={startCreateRequest}
+        onEditRequests={() => { useSmmStore.getState().setRequestsEditMode(true); setPage('smm-requests'); }}
+        onSendRequest={(ev: any) => openSmmSendWizard(ev)}
+        onChat={(ev: any) => openSmmGroupChat('event', ev)}
+        onAiChat={(ev: any) => openAiDiscuss({ ...ev, id: `smm-e:${ev.id}`, title: ev.title, smmKind: 'event' })}
+        onToggleBookmark={(id: string) => void toggleSmmBookmark('event', id)}
+        onOpenProfileUser={(u: any) => openUserLibrary(u)}
+        onOpenOtherEvent={() => { /* the library cards never show the other-events row for specialists */ }}
+        onOpenProfilePage={() => setPage('profile')}
+        onCycleLang={cycleLang}
+        gotoLibrary={gotoSmmLibrary}
+        gotoInbox={() => setPage('smm-inbox')}
+        gotoRequests={() => setPage('smm-requests')}
+      />
+    );
+  }
+
+  // SMM MAIL — «Почта», the customer's requests hub: the received
+  // applications (accept/decline) + the sent invitations (edit/withdraw),
+  // with the page's own sub-panel «Принятые запросы | Отправленные запросы»
+  // above the main dock (the brief's double-bottom pattern).
+  if (effectivePage === 'smm-mail') {
+    return (
+      <SmmMailView
+        user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '', image: (effectiveUser as any).image || null } : null}
+        myAvatar={myAvatar}
+        mySmmRole={mySmmRole}
+        goHome={() => setPage('dashboard')}
+        onOpenProfilePage={() => setPage('profile')}
+        onCycleLang={cycleLang}
+        onSwitchRole={switchSmmRole}
+        gotoEvents={() => setPage('smm-events')}
+        gotoRoles={(rs: 'mine' | 'public') => { useSmmStore.getState().setRolesScopeRequest(rs); setPage('smm-roles'); }}
+        gotoLibrary={gotoSmmLibrary}
+        gotoInbox={() => setPage('smm-inbox')}
+        gotoRequests={() => setPage('smm-requests')}
+        onOpenEvent={(eventId: string) => {
+          changeEventsScope('mine');
+          setFocusEventId(eventId);
+          setPage('smm-events');
+        }}
       />
     );
   }

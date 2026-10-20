@@ -45,6 +45,9 @@ interface SmmData {
   requestsEditMode: boolean;
   // The dock's «Личные роли | Общие роли» presets the roles page scope
   rolesScopeRequest: 'mine' | 'public';
+  // The specialist dock's «Личная | Публичная библиотека» presets the library
+  // page scope: mine = my bookmarked events, discover = the whole open library
+  libraryScope: 'mine' | 'discover';
 }
 
 const INITIAL: SmmData = {
@@ -67,6 +70,7 @@ const INITIAL: SmmData = {
   selRequestId: null,
   requestsEditMode: false,
   rolesScopeRequest: 'mine',
+  libraryScope: 'mine',
 };
 
 export const useSmmStore = makeStore(INITIAL);

@@ -432,6 +432,13 @@ const en: Dict = {
   smmDecline: 'Decline',
   // ── Почта (mail) ──
   smmMailTitle: 'Mail',
+  // ── Библиотека специалиста (library tabs) ──
+  smmLibPersonalTitle: 'Personal library',
+  smmLibPublicTitle: 'Public library',
+  smmLibPersonalEmpty: 'No bookmarked events yet',
+  smmLibPersonalHint: 'Bookmark events in the public library — they will gather here, ready for your requests',
+  smmLibPublicEmpty: 'The public library is empty for now',
+  smmLibPublicHint: 'Every published event lands here — bookmark the ones you like and send them your requests',
   smmSegReceived: 'Received requests',
   smmSegSent: 'Sent requests',
   smmMailReceivedEmpty: 'No received requests yet',
@@ -986,6 +993,13 @@ const ru: Dict = {
   smmDecline: 'Отклонить',
   // ── Почта ──
   smmMailTitle: 'Почта',
+  // ── Библиотека специалиста (вкладки библиотеки) ──
+  smmLibPersonalTitle: 'Личная библиотека',
+  smmLibPublicTitle: 'Публичная библиотека',
+  smmLibPersonalEmpty: 'Закладок мероприятий пока нет',
+  smmLibPersonalHint: 'Добавляйте мероприятия в закладки в публичной библиотеке — они соберутся здесь, готовые к отправке запросов',
+  smmLibPublicEmpty: 'Публичная библиотека пока пуста',
+  smmLibPublicHint: 'Все опубликованные мероприятия появятся здесь — добавляйте в закладки и отправляйте свои запросы',
   smmSegReceived: 'Принятые запросы',
   smmSegSent: 'Отправленные запросы',
   smmMailReceivedEmpty: 'Полученных запросов пока нет',
@@ -1539,6 +1553,13 @@ const uz: Dict = {
   smmDecline: 'Rad etish',
   // ── Почта ──
   smmMailTitle: 'Почта',
+  // ── Библиотека специалиста (вкладки библиотеки) ──
+  smmLibPersonalTitle: 'Shaxsiy kutubxona',
+  smmLibPublicTitle: 'Ommaviy kutubxona',
+  smmLibPersonalEmpty: 'Tadbir xatchoʻplari hali yoʻq',
+  smmLibPersonalHint: 'Ommaviy kutubxonadagi tadbirlarni xatchoʻplang — ular shu yerda toʻplanadi va soʻrov yuborishga tayyor turadi',
+  smmLibPublicEmpty: 'Ommaviy kutubxona hali boʻsh',
+  smmLibPublicHint: 'Barcha eʼlon qilingan tadbirlar shu yerda koʻrinadi — xatchoʻplang va oʻz soʻrovingizni yuboring',
   smmSegReceived: 'Qabul qilingan so\u02bbrovlar',
   smmSegSent: 'Yuborilgan so\u02bbrovlar',
   smmMailReceivedEmpty: 'Qabul qilingan so\u02bbrovlar yo\u02bbq',

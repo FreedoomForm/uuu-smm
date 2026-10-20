@@ -10,7 +10,7 @@
 // SMM pages: 'smm-mail' (Почта), 'smm-my-roles' (Личные роли), 'smm-shared-roles'
 // (Общие роли), 'smm-requests' family (the specialist's structured запросы),
 // 'smm-roles' (the roles pages host).
-export type Page = 'auth' | 'dashboard' | 'create-test' | 'edit-test' | 'create-event' | 'start-test' | 'take-test' | 'history' | 'profile' | 'guest-boot' | 'smm-events' | 'smm-inbox' | 'smm-wizard' | 'smm-requests' | 'smm-request-editor' | 'smm-request-fill' | 'smm-roles' | 'smm-mail' | 'smm-my-roles' | 'smm-shared-roles';
+export type Page = 'auth' | 'dashboard' | 'create-test' | 'edit-test' | 'create-event' | 'start-test' | 'take-test' | 'history' | 'profile' | 'guest-boot' | 'smm-events' | 'smm-inbox' | 'smm-wizard' | 'smm-requests' | 'smm-request-editor' | 'smm-request-fill' | 'smm-roles' | 'smm-mail' | 'smm-my-roles' | 'smm-shared-roles' | 'smm-library';
 
 export interface Question {
   id?: string;
