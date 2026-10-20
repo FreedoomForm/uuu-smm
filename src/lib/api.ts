@@ -255,6 +255,10 @@ export const api = {
     apiFetch('/smm/invitations', { method: 'POST', body: JSON.stringify(data) }),
   respondSmmInvitation: (id: string, action: 'accept' | 'decline') =>
     apiFetch(`/smm/invitations/${id}/respond`, { method: 'POST', body: JSON.stringify({ action }) }),
+  // Mail: edit the message of / withdraw my own pending sent invitation
+  updateSmmInvitation: (id: string, message: string) =>
+    apiFetch(`/smm/invitations/${id}`, { method: 'PUT', body: JSON.stringify({ message }) }),
+  withdrawSmmInvitation: (id: string) => apiFetch(`/smm/invitations/${id}`, { method: 'DELETE' }),
   getSmmApplications: (box: 'inbox' | 'sent') => apiFetch(`/smm/applications?box=${box}`) as Promise<any[]>,
   createSmmApplication: (data: { eventId: string; roleId: string; message?: string; requestId?: string }) =>
     apiFetch('/smm/applications', { method: 'POST', body: JSON.stringify(data) }),
@@ -277,16 +281,32 @@ export const api = {
     apiFetch('/smm/roles', { method: 'POST', body: JSON.stringify(data) }),
   attachSmmRoleTemplate: (roleId: string, eventId: string) =>
     apiFetch(`/smm/roles/${roleId}/attach`, { method: 'POST', body: JSON.stringify({ eventId }) }),
+  // Mail: edit the message of / withdraw my own pending sent application
+  updateSmmApplication: (id: string, message: string) =>
+    apiFetch(`/smm/applications/${id}`, { method: 'PUT', body: JSON.stringify({ message }) }),
+  withdrawSmmApplication: (id: string) => apiFetch(`/smm/applications/${id}`, { method: 'DELETE' }),
+  // «Личные роли» — the customer's own roles across their events
+  getMySmmRoles: () => apiFetch('/smm/my-roles') as Promise<any[]>,
+  // «Общие роли» — the shared role (ТЗ) template library
+  getSharedSmmRoles: () => apiFetch('/smm/shared-roles') as Promise<any[]>,
+  getSmmSharedRole: (id: string) => apiFetch(`/smm/shared-roles/${id}`) as Promise<any>,
+  createSmmSharedRole: (data: { sourceRoleId?: string; name?: string; brief?: string; payment?: string; deadline?: string }) =>
+    apiFetch('/smm/shared-roles', { method: 'POST', body: JSON.stringify(data) }),
+  updateSmmSharedRole: (id: string, data: { name?: string; brief?: string; payment?: string; deadline?: string }) =>
+    apiFetch(`/smm/shared-roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSmmSharedRole: (id: string) => apiFetch(`/smm/shared-roles/${id}`, { method: 'DELETE' }),
+  useSmmSharedRole: (id: string, eventId: string) =>
+    apiFetch(`/smm/shared-roles/${id}/use`, { method: 'POST', body: JSON.stringify({ eventId }) }),
   getSmmBookmarks: (targetType?: 'specialist' | 'event' | 'request' | 'role') =>
     apiFetch(`/smm/bookmarks${targetType ? `?targetType=${targetType}` : ''}`) as Promise<{ ids: string[]; pairs: { targetType: string; targetId: string }[] }>,
   addSmmBookmark: (targetType: 'specialist' | 'event' | 'request' | 'role', targetId: string) =>
     apiFetch('/smm/bookmarks', { method: 'POST', body: JSON.stringify({ targetType, targetId }) }),
   removeSmmBookmark: (targetType: 'specialist' | 'event' | 'request' | 'role', targetId: string) =>
     apiFetch(`/smm/bookmarks?targetType=${targetType}&targetId=${encodeURIComponent(targetId)}`, { method: 'DELETE' }),
-  // SMM group chat (about an event / a specialist)
-  getSmmMessages: (scopeType: 'event' | 'specialist', scopeId: string, after?: string) =>
+  // SMM group chat (about an event / a specialist / a shared role template)
+  getSmmMessages: (scopeType: 'event' | 'specialist' | 'shared-role', scopeId: string, after?: string) =>
     apiFetch(`/smm/chat?scopeType=${scopeType}&scopeId=${encodeURIComponent(scopeId)}${after ? `&after=${encodeURIComponent(after)}` : ''}`),
-  sendSmmMessage: (scopeType: 'event' | 'specialist', scopeId: string, text: string) =>
+  sendSmmMessage: (scopeType: 'event' | 'specialist' | 'shared-role', scopeId: string, text: string) =>
     apiFetch('/smm/chat', { method: 'POST', body: JSON.stringify({ scopeType, scopeId, text }) }),
   // AI chat about a SPECIALIST (the customer's research window) or an EVENT
   // (the «ИИ чат» card button — the event's brief, roles, money)

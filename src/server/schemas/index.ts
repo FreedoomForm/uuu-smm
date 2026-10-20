@@ -385,9 +385,39 @@ export const smmFileCreateSchema = z.object({
 });
 
 export const smmChatSendSchema = z.object({
-  scopeType: z.enum(["event", "specialist"]),
+  // "shared-role" — the group chat of a «Общие роли» template
+  scopeType: z.enum(["event", "specialist", "shared-role"]),
   scopeId: z.string().min(1).max(64),
   text: z.string().min(1).max(2000),
+});
+
+// «Общие роли» — shared role (ТЗ) templates. Create either by publishing an
+// existing event role (sourceRoleId) or standalone (name).
+export const smmSharedRoleCreateSchema = z
+  .object({
+    sourceRoleId: z.string().min(1).max(64).optional(),
+    name: z.string().trim().min(1).max(200).optional(),
+    brief: z.string().max(20000).optional(),
+    payment: z.string().max(120).optional(),
+    deadline: z.string().max(120).optional(),
+  })
+  .refine(b => !!b.sourceRoleId || !!b.name, { message: "sourceRoleId or name required" });
+
+export const smmSharedRoleUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  brief: z.string().max(20000).optional(),
+  payment: z.string().max(120).optional(),
+  deadline: z.string().max(120).optional(),
+});
+
+// Use a shared template: copy it into one of MY events as a role
+export const smmSharedRoleUseSchema = z.object({
+  eventId: z.string().min(1).max(64),
+});
+
+// Mail: edit the message of / withdraw one of MY OWN pending sent requests
+export const smmRequestMessageSchema = z.object({
+  message: z.string().max(8000),
 });
 
 export const smmAiChatSchema = z.object({

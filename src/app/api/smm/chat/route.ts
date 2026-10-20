@@ -1,6 +1,6 @@
 // SMM group chat (about an EVENT or a SPECIALIST) — the same polled pattern
 // as the per-test chat.
-// GET  ?scopeType=event|specialist&scopeId=…&after=<ISO> — public read
+// GET  ?scopeType=event|specialist|shared-role&scopeId=…&after=<ISO> — public read
 // POST — send a message (any signed-in user)
 import { NextResponse } from "next/server";
 import { withApi, withApiAuth } from "@/server/http/handler";
@@ -9,7 +9,8 @@ import { smmChatSendSchema } from "@/server/schemas";
 import { getSmmMessages, sendSmmMessage } from "@/server/services/smm.service";
 
 export const GET = withApi(async ({ searchParams }) => {
-  const scopeType = searchParams.get("scopeType") === "event" ? "event" : "specialist";
+  const rawScope = searchParams.get("scopeType") || "";
+  const scopeType = (rawScope === "event" || rawScope === "shared-role") ? rawScope : "specialist";
   const scopeId = (searchParams.get("scopeId") || "").slice(0, 64);
   if (!scopeId) return NextResponse.json([]);
   const after = searchParams.get("after") || undefined;

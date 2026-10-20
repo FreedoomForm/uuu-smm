@@ -603,13 +603,16 @@ export async function deleteSmmFile(id: string, userId: string) {
 
 // ------------------------------------------------------------------- chat --
 
-export async function getSmmMessages(scopeType: "event" | "specialist", scopeId: string, after?: string) {
+export async function getSmmMessages(scopeType: "event" | "specialist" | "shared-role", scopeId: string, after?: string) {
   if (scopeType === "event") {
     const ev = await db.smmEvent.findUnique({ where: { id: scopeId }, select: { id: true } });
     if (!ev) throw ApiError.notFound("Event not found");
-  } else {
+  } else if (scopeType === "specialist") {
     const u = await db.user.findUnique({ where: { id: scopeId }, select: { id: true } });
     if (!u) throw ApiError.notFound("Specialist not found");
+  } else {
+    const r = await db.smmSharedRole.findUnique({ where: { id: scopeId }, select: { id: true } });
+    if (!r) throw ApiError.notFound("Shared role not found");
   }
   const rows = await db.smmChatMessage.findMany({
     where: { scopeType, scopeId, ...(after ? { createdAt: { gt: new Date(after) } } : {}) },
@@ -620,7 +623,7 @@ export async function getSmmMessages(scopeType: "event" | "specialist", scopeId:
   return rows;
 }
 
-export async function sendSmmMessage(scopeType: "event" | "specialist", scopeId: string, userId: string, text: string) {
+export async function sendSmmMessage(scopeType: "event" | "specialist" | "shared-role", scopeId: string, userId: string, text: string) {
   const user = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
   if (!user) throw ApiError.unauthorized("Not authenticated");
   await getSmmMessages(scopeType, scopeId); // validates the scope exists
@@ -950,4 +953,197 @@ export async function shareRequest(userId: string, requestId: string, body: { sc
     return { ok: true, isPublic: next };
   }
   return { ok: true, isPublic: req.isPublic };
+}
+
+// ------------------------------------------------------------ my roles (Личные роли) --
+
+/** Every role (ТЗ) of MY OWN events — the customer's «Личные роли» review
+ * page. One flat feed of role cards, each carrying its event context,
+ * the assigned specialists (accepted invites + applications), the live
+ * application counters and the shared-template link (when the role is
+ * published to «Общие роли»). */
+export async function listMyRoles(userId: string) {
+  const roles = await db.smmRole.findMany({
+    where: { event: { customerId: userId } },
+    orderBy: [{ event: { createdAt: "desc" } }, { orderNum: "asc" }],
+    include: {
+      event: {
+        select: {
+          id: true, title: true, summary: true, kind: true,
+          coverColor: true, coverIcon: true, isPublic: true, status: true,
+          customerId: true,
+        },
+      },
+      _count: { select: { applications: { where: { status: "pending" } }, invitations: true } },
+    },
+  });
+  if (roles.length === 0) return [];
+  const [inv, apps, shared] = await Promise.all([
+    db.smmInvitation.findMany({
+      where: { status: "accepted", event: { customerId: userId } },
+      select: { roleId: true, specialist: { select: { id: true, name: true, image: true } } },
+    }),
+    db.smmApplication.findMany({
+      where: { status: "accepted", event: { customerId: userId } },
+      select: { roleId: true, specialist: { select: { id: true, name: true, image: true } } },
+    }),
+    db.smmSharedRole.findMany({
+      where: { authorId: userId, sourceRoleId: { not: null } },
+      select: { id: true, sourceRoleId: true },
+    }),
+  ]);
+  const assigned = new Map<string, { userId: string; name: string; image: string | null; source: string }[]>();
+  for (const r of [...inv, ...apps]) {
+    const list = assigned.get(r.roleId) || [];
+    if (!list.some(x => x.userId === r.specialist.id)) {
+      list.push({ userId: r.specialist.id, name: r.specialist.name, image: r.specialist.image, source: "accepted" });
+    }
+    assigned.set(r.roleId, list);
+  }
+  const sharedByRole = new Map(shared.map(s => [s.sourceRoleId as string, s.id]));
+  return roles.map(r => ({
+    id: r.id,
+    eventId: r.event?.id ?? null,
+    event: r.event,
+    name: r.name,
+    brief: r.brief,
+    payment: r.payment,
+    deadline: r.deadline,
+    orderNum: r.orderNum,
+    createdAt: r.createdAt,
+    assigned: assigned.get(r.id) || [],
+    pendingApplications: r._count.applications,
+    invitationsCount: r._count.invitations,
+    sharedRoleId: sharedByRole.get(r.id) || null,
+  }));
+}
+
+// ------------------------------------------------- shared roles (Общие роли) --
+
+const SHARED_ROLE_INCLUDE = {
+  author: { select: { id: true, name: true, image: true } },
+};
+
+/** The «Общие роли» community library — every published ТЗ template,
+ * newest first. isOwn drives the edit/delete ladder on the cards. */
+export async function listSharedRoles(userId: string) {
+  const rows = await db.smmSharedRole.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 200,
+    include: SHARED_ROLE_INCLUDE,
+  });
+  return rows.map(r => ({ ...r, isOwn: r.authorId === userId }));
+}
+
+export async function getSharedRole(id: string, userId?: string) {
+  const r = await db.smmSharedRole.findUnique({ where: { id }, include: SHARED_ROLE_INCLUDE });
+  if (!r) throw ApiError.notFound("Shared role not found");
+  return { ...r, isOwn: !!userId && r.authorId === userId };
+}
+
+/** Publish a ТЗ template: either from one of MY event roles (upsert — one
+ * template per source role) or standalone. */
+export async function createSharedRole(
+  userId: string,
+  body: { sourceRoleId?: string; name?: string; brief?: string; payment?: string; deadline?: string }
+) {
+  if (body.sourceRoleId) {
+    const role = await db.smmRole.findUnique({
+      where: { id: body.sourceRoleId },
+      select: { id: true, name: true, brief: true, payment: true, deadline: true, event: { select: { id: true, customerId: true } } },
+    });
+    if (!role) throw ApiError.notFound("Role not found");
+    if (role.event?.customerId !== userId) throw ApiError.forbidden("Not your role");
+    const existing = await db.smmSharedRole.findUnique({ where: { sourceRoleId: role.id } });
+    if (existing) {
+      return db.smmSharedRole.update({
+        where: { id: existing.id },
+        data: { name: role.name, brief: role.brief, payment: role.payment, deadline: role.deadline },
+        include: SHARED_ROLE_INCLUDE,
+      });
+    }
+    return db.smmSharedRole.create({
+      data: {
+        authorId: userId, name: role.name, brief: role.brief,
+        payment: role.payment, deadline: role.deadline,
+        sourceEventId: role.event?.id ?? null, sourceRoleId: role.id,
+      },
+      include: SHARED_ROLE_INCLUDE,
+    });
+  }
+  return db.smmSharedRole.create({
+    data: {
+      authorId: userId,
+      name: body.name!.trim(),
+      brief: body.brief || "",
+      payment: body.payment || "",
+      deadline: body.deadline || "",
+    },
+    include: SHARED_ROLE_INCLUDE,
+  });
+}
+
+export async function updateSharedRole(id: string, userId: string, body: { name?: string; brief?: string; payment?: string; deadline?: string }) {
+  const r = await db.smmSharedRole.findUnique({ where: { id }, select: { authorId: true } });
+  if (!r) throw ApiError.notFound("Shared role not found");
+  if (r.authorId !== userId) throw ApiError.forbidden("Not your template");
+  return db.smmSharedRole.update({ where: { id }, data: body, include: SHARED_ROLE_INCLUDE });
+}
+
+export async function deleteSharedRole(id: string, userId: string) {
+  const r = await db.smmSharedRole.findUnique({ where: { id }, select: { authorId: true } });
+  if (!r) throw ApiError.notFound("Shared role not found");
+  if (r.authorId !== userId) throw ApiError.forbidden("Not your template");
+  await db.smmSharedRole.delete({ where: { id } });
+  return { ok: true };
+}
+
+/** Use a shared template: copy it into one of MY events as a new role. */
+export async function useSharedRole(id: string, userId: string, eventId: string) {
+  await assertEventOwner(eventId, userId);
+  const r = await db.smmSharedRole.findUnique({ where: { id } });
+  if (!r) throw ApiError.notFound("Shared role not found");
+  const count = await db.smmRole.count({ where: { eventId } });
+  return db.smmRole.create({
+    data: { name: r.name, brief: r.brief, payment: r.payment, deadline: r.deadline, eventId, orderNum: count },
+  });
+}
+
+// ------------------------------------------------- mail: edit / withdraw requests --
+
+type RequestKind = "invitation" | "application";
+
+/** Edit the message of MY OWN pending sent request (invitation or
+ * application) — the mail page's «Изменить» edit mode. */
+export async function updateRequestMessage(kind: RequestKind, id: string, userId: string, message: string) {
+  if (kind === "invitation") {
+    const inv = await db.smmInvitation.findUnique({ where: { id }, select: { customerId: true, status: true } });
+    if (!inv) throw ApiError.notFound("Invitation not found");
+    if (inv.customerId !== userId) throw ApiError.forbidden("Not your invitation");
+    if (inv.status !== "pending") throw ApiError.badRequest("Already responded");
+    return db.smmInvitation.update({ where: { id }, data: { message } });
+  }
+  const app = await db.smmApplication.findUnique({ where: { id }, select: { specialistId: true, status: true } });
+  if (!app) throw ApiError.notFound("Application not found");
+  if (app.specialistId !== userId) throw ApiError.forbidden("Not your application");
+  if (app.status !== "pending") throw ApiError.badRequest("Already responded");
+  return db.smmApplication.update({ where: { id }, data: { message } });
+}
+
+/** Withdraw MY OWN pending sent request — it disappears for both sides. */
+export async function withdrawRequest(kind: RequestKind, id: string, userId: string) {
+  if (kind === "invitation") {
+    const inv = await db.smmInvitation.findUnique({ where: { id }, select: { customerId: true, status: true } });
+    if (!inv) throw ApiError.notFound("Invitation not found");
+    if (inv.customerId !== userId) throw ApiError.forbidden("Not your invitation");
+    if (inv.status !== "pending") throw ApiError.badRequest("Already responded");
+    await db.smmInvitation.delete({ where: { id } });
+    return { ok: true };
+  }
+  const app = await db.smmApplication.findUnique({ where: { id }, select: { specialistId: true, status: true } });
+  if (!app) throw ApiError.notFound("Application not found");
+  if (app.specialistId !== userId) throw ApiError.forbidden("Not your application");
+  if (app.status !== "pending") throw ApiError.badRequest("Already responded");
+  await db.smmApplication.delete({ where: { id } });
+  return { ok: true };
 }

@@ -56,6 +56,8 @@ model User {
   smmRate      String  @default("")
   smmReady     Boolean @default(true)
   smmBookmarks SmmBookmark[]
+  // Shared role templates («Общие роли») authored by this user
+  smmSharedRoles         SmmSharedRole[] @relation("SmmSharedRoleAuthor")
   // Opposite sides of the SMM relations
   smmEventsOwned         SmmEvent[]      @relation("SmmEventCustomer")
   smmInvitationsSent     SmmInvitation[] @relation("SmmInvitationCustomer")
@@ -279,6 +281,30 @@ model SmmApplication {
   @@index([specialistId, status])
 }
 
+// Общий шаблон роли («Общие роли») — a ТЗ template anybody publishes so
+// other people can reuse it in their own events. Created either from an
+// existing event role (sourceRoleId/sourceEventId keep the provenance, one
+// template per source role) or standalone from the Shared-roles page.
+model SmmSharedRole {
+  id            String   @id @default(cuid())
+  authorId      String
+  author        User     @relation("SmmSharedRoleAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  name          String
+  brief         String   @default("") // ТЗ текст — the template body
+  payment       String   @default("")
+  deadline      String   @default("")
+  // Provenance: set when the template was published from an event role.
+  // sourceRoleId is UNIQUE — republishing a role updates its template
+  // instead of duplicating it, and unpublishing removes exactly that one.
+  sourceEventId String?
+  sourceRoleId  String?  @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([authorId, createdAt])
+  @@index([createdAt])
+}
+
 // SMM personal library: a customer pins SPECIALISTS, a specialist pins
 // EVENTS. (Polymorphic — the test Bookmark table stays untouched.)
 model SmmBookmark {
@@ -298,7 +324,7 @@ model SmmBookmark {
 // pattern as the per-test ChatMessage.
 model SmmChatMessage {
   id        String   @id @default(cuid())
-  scopeType String // "event" | "specialist"
+  scopeType String // "event" | "specialist" | "shared-role"
   scopeId   String
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
