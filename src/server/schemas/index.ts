@@ -22,8 +22,6 @@ export const registerSchema = z.object({
     .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "must be a valid email"),
   name: z.string().trim().min(1).max(60),
   password: z.string().min(6).max(100),
-  // SMM account kind — «Заказчик» | «SMM-специалист» picker at signup
-  smmRole: z.enum(["customer", "specialist"]).optional(),
 });
 
 export const loginSchema = z.object({
@@ -146,11 +144,6 @@ export const shareTestSchema = z.object({
   scope: z.enum(["link", "community"]).optional().catch("link" as const),
 });
 
-// The event's share — the exact analogue of shareTestSchema.
-export const smmEventShareSchema = z.object({
-  scope: z.enum(["link", "community"]).optional().catch("link" as const),
-});
-
 export const saveTranslationsSchema = z.object({
   lang: z.enum(["en", "ru", "uz"]),
   items: z
@@ -255,183 +248,8 @@ export const profileUpdateSchema = z.object({
   name: z.string().max(120).optional(),
   bgStyle: z.string().max(120).optional(),
   lang: z.enum(["en", "ru", "uz"]).optional(),
-  // SMM account kind — switchable in the profile page
-  smmRole: z.enum(["customer", "specialist"]).optional(),
 });
 
 export const interestsSchema = z.object({
   interests: z.unknown().optional(), // cleaned by sanitizeInterests in the service
-});
-
-// ------------------------------------------------------------------- smm ----
-// Registration accepts the account kind (заказчик | SMM-специалист);
-// it defaults to "customer" server-side when omitted.
-export const smmProfileSchema = z.object({
-  smmRole: z.enum(["customer", "specialist"]).optional(),
-  smmHeadline: z.string().max(120).optional(),
-  smmResume: z.string().max(8000).optional(),
-  // Presentation video — tg:/data:/https: reference, same rules as media everywhere
-  smmVideoUrl: z.string().max(11_000_000).nullish(),
-  smmCity: z.string().max(60).optional(),
-  smmRate: z.string().max(120).optional(),
-  smmReady: z.boolean().optional(),
-});
-
-export const smmRoleInputSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  brief: z.string().max(8000).optional(),
-  payment: z.string().max(120).optional(),
-  deadline: z.string().max(120).optional(),
-});
-
-export const smmEventCreateSchema = z.object({
-  title: z.string().trim().min(1).max(200),
-  summary: z.string().max(1000).optional(),
-  brief: z.string().max(20000).optional(),
-  deadline: z.string().max(120).optional(),
-  budget: z.string().max(120).optional(),
-  restrictions: z.string().max(2000).optional(),
-  kind: z.enum(["business", "government"]).optional(),
-  coverColor: z.string().max(40).nullish(),
-  coverIcon: z.string().max(40).nullish(),
-  isPublic: z.boolean().optional(),
-  roles: z.array(smmRoleInputSchema).max(50).optional(),
-});
-
-export const smmEventUpdateSchema = smmEventCreateSchema.partial().extend({
-  status: z.enum(["open", "closed"]).optional(),
-});
-
-export const smmRoleUpdateSchema = smmRoleInputSchema.partial().extend({
-  isPublic: z.boolean().optional(),
-});
-
-export const smmInvitationCreateSchema = z.object({
-  eventId: z.string().min(1).max(64),
-  roleId: z.string().min(1).max(64),
-  specialistId: z.string().min(1).max(64),
-  // Уникальное ТЗ из «Дополнительных настроек» — overrides the role template
-  message: z.string().max(8000).optional(),
-});
-
-export const smmApplicationCreateSchema = z.object({
-  eventId: z.string().min(1).max(64),
-  roleId: z.string().min(1).max(64),
-  // Уникальный текст заявки из «Дополнительных настроек»
-  message: z.string().max(8000).optional(),
-  // The structured запрос the specialist sends with this application
-  requestId: z.string().min(1).max(64).optional(),
-});
-
-export const smmRespondSchema = z.object({
-  action: z.enum(["accept", "decline"]),
-});
-
-export const smmBookmarkSchema = z.object({
-  targetType: z.enum(["specialist", "event", "request", "role"]),
-  targetId: z.string().min(1).max(64),
-});
-
-// ── ЗАПРОСЫ — the specialist's structured proposals ──────────────────────
-export const smmRequestStepInputSchema = z.object({
-  title: z.string().max(200).optional(),
-  hint: z.string().max(2000).optional(),
-  answer: z.string().max(20000).optional(),
-});
-
-export const smmRequestCreateSchema = z.object({
-  title: z.string().trim().min(1).max(200),
-  summary: z.string().max(1000).optional(),
-  coverColor: z.string().max(40).nullish(),
-  coverIcon: z.string().max(40).nullish(),
-  isPublic: z.boolean().optional(),
-  steps: z.array(smmRequestStepInputSchema).max(60).optional(),
-});
-
-export const smmRequestUpdateSchema = z.object({
-  title: z.string().trim().min(1).max(200).optional(),
-  summary: z.string().max(1000).optional(),
-  coverColor: z.string().max(40).nullish(),
-  coverIcon: z.string().max(40).nullish(),
-  isPublic: z.boolean().optional(),
-  steps: z.array(smmRequestStepInputSchema).max(60).optional(),
-});
-
-export const smmRequestShareSchema = z.object({
-  scope: z.enum(["link", "community"]).optional().catch("link" as const),
-});
-
-// Standalone public role template («Общие роли») + attaching one to my event
-export const smmRoleTemplateCreateSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  brief: z.string().max(8000).optional(),
-  payment: z.string().max(120).optional(),
-  deadline: z.string().max(120).optional(),
-  isPublic: z.boolean().optional(),
-});
-
-export const smmRoleAttachSchema = z.object({
-  eventId: z.string().min(1).max(64),
-});
-
-export const smmFileCreateSchema = z.object({
-  ownerType: z.enum(["user", "event"]),
-  ownerId: z.string().min(1).max(64),
-  title: z.string().max(200).optional(),
-  type: z.string().max(20).optional(),
-  url: z.string().max(11_000_000),
-  size: z.number().int().nullish(),
-  tgMessageId: z.number().int().nullish(),
-});
-
-export const smmChatSendSchema = z.object({
-  // "shared-role" — the group chat of a «Общие роли» template
-  scopeType: z.enum(["event", "specialist", "shared-role"]),
-  scopeId: z.string().min(1).max(64),
-  text: z.string().min(1).max(2000),
-});
-
-// «Общие роли» — shared role (ТЗ) templates. Create either by publishing an
-// existing event role (sourceRoleId) or standalone (name).
-export const smmSharedRoleCreateSchema = z
-  .object({
-    sourceRoleId: z.string().min(1).max(64).optional(),
-    name: z.string().trim().min(1).max(200).optional(),
-    brief: z.string().max(20000).optional(),
-    payment: z.string().max(120).optional(),
-    deadline: z.string().max(120).optional(),
-  })
-  .refine(b => !!b.sourceRoleId || !!b.name, { message: "sourceRoleId or name required" });
-
-export const smmSharedRoleUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(200).optional(),
-  brief: z.string().max(20000).optional(),
-  payment: z.string().max(120).optional(),
-  deadline: z.string().max(120).optional(),
-});
-
-// Use a shared template: copy it into one of MY events as a role
-export const smmSharedRoleUseSchema = z.object({
-  eventId: z.string().min(1).max(64),
-});
-
-// Mail: edit the message of / withdraw one of MY OWN pending sent requests
-export const smmRequestMessageSchema = z.object({
-  message: z.string().max(8000),
-});
-
-export const smmAiChatSchema = z.object({
-  specialistId: z.string().min(1).max(64).optional(),
-  eventId: z.string().min(1).max(64).optional(),
-  requestId: z.string().min(1).max(64).optional(),
-  roleId: z.string().min(1).max(64).optional(),
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(["user", "assistant"]),
-        content: z.string().max(8000),
-      })
-    )
-    .min(1)
-    .max(60),
 });

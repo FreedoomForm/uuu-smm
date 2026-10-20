@@ -19,14 +19,7 @@ import { collectUserChannelFiles } from "./telegram-cleanup";
 export async function getProfile(userId: string) {
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: {
-      id: true, email: true, name: true, bgStyle: true, lang: true, image: true,
-      // SMM account kind — the client swaps the feed content kind by it
-      smmRole: true,
-      // The specialist's анкета fields (customer keeps them empty)
-      smmHeadline: true, smmResume: true, smmVideoUrl: true,
-      smmCity: true, smmRate: true, smmReady: true,
-    },
+    select: { id: true, email: true, name: true, bgStyle: true, lang: true, image: true },
   });
   if (!user) throw ApiError.notFound("User not found");
   return user;
@@ -34,9 +27,9 @@ export async function getProfile(userId: string) {
 
 export async function updateProfile(
   userId: string,
-  body: { name?: string; bgStyle?: string; lang?: string; smmRole?: string }
+  body: { name?: string; bgStyle?: string; lang?: string }
 ) {
-  const data: { name?: string; bgStyle?: string; lang?: string; smmRole?: string } = {};
+  const data: { name?: string; bgStyle?: string; lang?: string } = {};
 
   if (typeof body.name === "string") {
     const name = body.name.trim();
@@ -56,9 +49,6 @@ export async function updateProfile(
     }
     data.lang = body.lang;
   }
-  if (body.smmRole === "customer" || body.smmRole === "specialist") {
-    data.smmRole = body.smmRole;
-  }
 
   if (Object.keys(data).length === 0) {
     throw ApiError.badRequest("Nothing to update");
@@ -67,7 +57,7 @@ export async function updateProfile(
   return db.user.update({
     where: { id: userId },
     data,
-    select: { id: true, email: true, name: true, bgStyle: true, lang: true, smmRole: true },
+    select: { id: true, email: true, name: true, bgStyle: true, lang: true },
   });
 }
 
@@ -81,29 +71,6 @@ export async function deleteAccount(userId: string) {
   // Collect every Telegram-hosted file BEFORE the cascade wipes the rows.
   const channelFiles = await collectUserChannelFiles(userId);
 
-  // SMM files are polymorphic (no FK) — collect their channel posts and wipe
-  // the rows explicitly: own profile files + files of the user's own events.
-  const myEventIds = (
-    await db.smmEvent.findMany({ where: { customerId: userId }, select: { id: true } })
-  ).map(e => e.id);
-  const smmFiles = await db.smmFile.findMany({
-    where: {
-      OR: [
-        { ownerType: "user", ownerId: userId },
-        { ownerType: "event", ownerId: { in: myEventIds } },
-      ],
-    },
-    select: { url: true, tgMessageId: true },
-  });
-  await db.smmFile.deleteMany({
-    where: {
-      OR: [
-        { ownerType: "user", ownerId: userId },
-        { ownerType: "event", ownerId: { in: myEventIds } },
-      ],
-    },
-  });
-
   // The Test→User relation is Restrict (no cascade), so the user's own
   // tests must go first — the Test-side cascades wipe their questions,
   // attachments, attempts, bookmarks and chats in the same round.
@@ -112,8 +79,7 @@ export async function deleteAccount(userId: string) {
 
   // Best-effort channel cleanup — the account is already gone at this point.
   await Promise.allSettled(
-    [...channelFiles, ...smmFiles.filter(f => f.tgMessageId && f.url.startsWith("tg:")).map(f => ({ fileId: f.url.slice(3), msgId: f.tgMessageId! }))]
-      .map((f) => telegramDeleteFile(f.fileId, f.msgId))
+    channelFiles.map((f) => telegramDeleteFile(f.fileId, f.msgId))
   );
 
   return { success: true };

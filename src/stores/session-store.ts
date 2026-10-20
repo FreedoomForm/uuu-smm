@@ -17,8 +17,6 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
-  // SMM account kind — the dashboard feed swaps its content kind by it
-  smmRole?: 'customer' | 'specialist';
 }
 
 // Interface language lives in the DATABASE (User.lang) — never on the
@@ -48,8 +46,6 @@ interface SessionData {
   email: string;
   name: string;
   password: string;
-  // SMM account kind picked at signup (заказчик | SMM-специалист)
-  smmRole: 'customer' | 'specialist';
 }
 
 interface SessionActions extends Setters<SessionData> {
@@ -68,7 +64,6 @@ const INITIAL: SessionData = {
   email: '',
   name: '',
   password: '',
-  smmRole: 'customer',
 };
 
 export const useSessionStore = create<SessionData & SessionActions>(set => ({
@@ -85,7 +80,6 @@ export const useSessionStore = create<SessionData & SessionActions>(set => ({
     'email',
     'name',
     'password',
-    'smmRole',
   ]),
   cycleLang: () =>
     set((s: SessionData & SessionActions) => ({ lang: NEXT_LANG[s.lang] })),

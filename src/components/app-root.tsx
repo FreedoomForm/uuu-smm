@@ -124,17 +124,6 @@ import {
   TreeDeciduous,
   Ban,
   GitBranch,
-  Bell,
-  Briefcase,
-  Building2,
-  Banknote,
-  CalendarClock,
-  Landmark,
-  MapPin,
-  Megaphone,
-  ShieldAlert,
-  UserPlus,
-  Video,
 } from 'lucide-react';
 import { VersionNameSheet } from '@/components/version-name-sheet';
 const PhotoshopColorPicker = dynamic(() => import('@/components/color-picker').then(m => m.PhotoshopColorPicker), { ssr: false });
@@ -147,19 +136,6 @@ import StartTestView from '@/components/pages/start-test-view';
 import TakeTestView from '@/components/pages/take-test-view';
 import DashboardView from '@/components/pages/dashboard-view';
 import type { FeedApi } from '@/components/pages/dashboard-view';
-import SmmWizardView from '@/components/pages/smm-wizard-view';
-import SmmEventsView from '@/components/pages/smm-events-view';
-import SmmEventEditorView from '@/components/pages/smm-event-editor-view';
-import SmmInboxView from '@/components/pages/smm-inbox-view';
-import SmmRequestsView from '@/components/pages/smm-requests-view';
-import SmmRequestEditorView from '@/components/pages/smm-request-editor-view';
-import SmmRequestFillView from '@/components/pages/smm-request-fill-view';
-import SmmRolesView from '@/components/pages/smm-roles-view';
-import SmmLibraryView from '@/components/pages/smm-library-view';
-import SmmMailView from '@/components/pages/smm-mail-view';
-import { useSmmStore, smmNow } from '@/stores/smm-store';
-import { useEventEditorStore, resetEventForm, eventEditorNow } from '@/stores/event-editor-store';
-import { useRequestEditorStore, resetRequestForm, requestEditorNow } from '@/stores/request-editor-store';
 import CreateEditView from '@/components/pages/create-edit-view';
 import LangButton from '@/components/lang-button';
 import { CreatorStrip, TranslatingPill, topicBgClass, tagHash, coverBgFor, imgSrc, GLASS_TILE } from '@/components/shared-bits';
@@ -700,86 +676,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   // phone — identity, language, avatar and history all come from the network.
   const hydratedUser = useSessionStore(s => s.hydratedUser);
   const setHydratedUser = useSessionStore(s => s.setHydratedUser);
-
-  // ─── SMM MARKETPLACE ────────────────────────────────────────────────────
-  // The role-aware feed (customer → specialists / specialist → events),
-  // the wizard bindings and the SMM bookmark cache. See smm-store.ts.
-  const [smmFeed, setSmmFeed] = useState<{ kind: 'specialists' | 'events'; items: any[] }>({ kind: 'specialists', items: [] });
-  const [smmLoading, setSmmLoading] = useState(false);
-  const wizardBusy = useSmmStore(s => s.wizardBusy);
-  const smmBmSpecialists = useSmmStore(s => s.smmBmSpecialists);
-  const smmBmEvents = useSmmStore(s => s.smmBmEvents);
-  const smmBmRequests = useSmmStore(s => s.smmBmRequests);
-  const smmBmRoles = useSmmStore(s => s.smmBmRoles);
-  const requestsEditModeFlag = useSmmStore(s => s.requestsEditMode);
-  const refreshSmmFeed = useCallback(async (scopeOverride?: 'mine' | 'discover') => {
-    const st = useSessionStore.getState();
-    const uid = st.user?.id || st.hydratedUser?.id;
-    if (!uid) return;
-    const scope = scopeOverride || (navNow().discoverMode ? 'discover' : 'mine');
-    setSmmLoading(true);
-    try {
-      const feed = await api.getSmmFeed({ scope, limit: 30 });
-      setSmmFeed({ kind: feed.kind, items: feed.items || [] });
-    } catch { /* transient */ }
-    setSmmLoading(false);
-  }, []);
-  const loadSmmBookmarks = useCallback(() => {
-    api.getSmmBookmarks().then(r => {
-      const st = useSmmStore.getState();
-      st.setSmmBmSpecialists(r.pairs.filter(p => p.targetType === 'specialist').map(p => p.targetId));
-      st.setSmmBmEvents(r.pairs.filter(p => p.targetType === 'event').map(p => p.targetId));
-      st.setSmmBmRequests(r.pairs.filter(p => p.targetType === 'request').map(p => p.targetId));
-      st.setSmmBmRoles(r.pairs.filter(p => p.targetType === 'role').map(p => p.targetId));
-    }).catch(() => {});
-  }, []);
-
-  // ─── The customer's EVENTS PAGE feed (kind=events override) ──────────────
-  // Personal scope = the customer's OWN events + the pinned ones; discover =
-  // the general events library (every public open event). The events page is
-  // the dashboard's twin: same panels, same view kinds, event cards instead
-  // of specialist cards.
-  const [eventsScope, setEventsScope] = useState<'mine' | 'discover'>('mine');
-  const [eventsItems, setEventsItems] = useState<any[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [focusEventId, setFocusEventId] = useState<string | null>(null);
-  const eventsScopeRef = useRef(eventsScope);
-  eventsScopeRef.current = eventsScope;
-  // ── ЗАПРОСЫ (the specialist's structured proposals) + РОЛИ pages state ──
-  const [requestsScope, setRequestsScope] = useState<'mine' | 'public'>('mine');
-  const [requestsItems, setRequestsItems] = useState<any[]>([]);
-  const [requestsLoading, setRequestsLoading] = useState(false);
-  const [focusRequestId, setFocusRequestId] = useState<string | null>(null);
-  const [deleteRequestId, setDeleteRequestId] = useState<string | null>(null);
-  const [requestSaving, setRequestSaving] = useState(false);
-  // The filling screen (the test-taking twin): the запрос being filled with
-  // its editable steps + the save spinner
-  const [fillRequest, setFillRequest] = useState<any | null>(null);
-  const [fillBusy, setFillBusy] = useState(false);
-  // ── РОЛИ (the customer's «Личные роли» + «Общие роли») pages state ──
-  const [rolesScope, setRolesScope] = useState<'mine' | 'public'>('mine');
-  const [rolesItems, setRolesItems] = useState<any[]>([]);
-  const [rolesLoading, setRolesLoading] = useState(false);
-  const [myEventsCache, setMyEventsCache] = useState<any[]>([]);
-  const refreshEventsFeed = useCallback(async (scopeOverride?: 'mine' | 'discover', focusId?: string | null) => {
-    const st = useSessionStore.getState();
-    const uid = st.user?.id || st.hydratedUser?.id;
-    if (!uid) return;
-    const scope = scopeOverride || eventsScopeRef.current;
-    setEventsLoading(true);
-    try {
-      const feed = await api.getSmmFeed({ scope, limit: 30, kind: 'events' });
-      setEventsItems(feed.items || []);
-    } catch { /* transient */ }
-    setEventsLoading(false);
-    if (focusId !== undefined) setFocusEventId(focusId);
-  }, []);
-  const changeEventsScope = useCallback((s: 'mine' | 'discover') => {
-    setEventsScope(s);
-    eventsScopeRef.current = s;
-    void refreshEventsFeed(s);
-  }, [refreshEventsFeed]);
-
   useEffect(() => {
     void (async () => {
       const me = await api.getSession();
@@ -799,10 +695,8 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
         setDataReady(true);
         return;
       }
-      // Normalize the SMM account kind (string → union) for the session store
-      const meNorm = { ...me, smmRole: (me.smmRole === 'specialist' ? 'specialist' : 'customer') as 'customer' | 'specialist' };
-      setUser(meNorm); // in-memory session cache only
-      setHydratedUser(meNorm);
+      setUser(me); // in-memory session cache only
+      setHydratedUser(me);
       // Interface language: DB first (User.lang), then the pre-DB device
       // choice (one-time migration), then browser detection. The picked
       // language is PERSISTED TO THE DB, never to the device.
@@ -831,10 +725,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
       if (me.image && me.image.startsWith('data:')) setMyAvatar(me.image);
       if (typeof me.bgStyle === 'string') setMyBgStyle(me.bgStyle);
       setProfileName(me.name);
-      // SMM boot: the bookmark cache + the role-aware feed (background —
-      // the dashboard skeleton paints first, the SMM slides fill in after)
-      loadSmmBookmarks();
-      refreshSmmFeed();
       bindProgressFlush();
       // === Stale-while-revalidate boot (TikTok-speed first paint) ===
       // The server HTML already painted the full dashboard shell; within a
@@ -878,15 +768,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   // login via the mount effect below).
   const landingPage = !mounted && authed && page === 'auth' ? 'dashboard' : page;
   const effectivePage = landingPage === 'auth' && mounted && hydratedUser ? 'dashboard' : landingPage;
-
-  // The SMM account kind drives the dashboard feed kind + the dock button
-  const mySmmRole = effectiveUser?.smmRole || 'customer';
-  // The SMM feed follows the dashboard scope (personal ↔ discover)
-  useEffect(() => {
-    if (!effectiveUser || effectivePage !== 'dashboard') return;
-    refreshSmmFeed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [discoverMode, effectiveUser?.id]);
 
   // Persist the interface language to the DATABASE on every change the USER
   // makes (the cycle button). The value applied during boot is consumed via
@@ -1140,77 +1021,11 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     });
   });
 
-  // Shared EVENT link (?event=<id>): open that event's card on the events
-  // page — the events analogue of the tests' ?test= deep link. A guest who
-  // opens the link lands on the auth screen first; the URL stays intact, so
-  // right after login/registration this handler fires and opens the event.
-  const sharedEventHandledRef = useRef(false);
-  useEffect(() => {
-    if (sharedEventHandledRef.current || !dataReady || !effectiveUser || effectivePage !== 'dashboard') return;
-    let raw: string | null = null;
-    try { raw = new URLSearchParams(window.location.search).get('event'); } catch { raw = null; }
-    if (!raw) return;
-    sharedEventHandledRef.current = true; // guard before the async work
-    const id = raw.trim().slice(0, 40);
-    const cleanUrl = () => { try { window.history.replaceState({}, '', window.location.pathname); } catch {} };
-    api.getSmmEvent(id).then((detail: any) => {
-      const own = detail.customerId === effectiveUser.id;
-      setEventsScope(own ? 'mine' : 'discover');
-      eventsScopeRef.current = own ? 'mine' : 'discover';
-      setEventsItems(prev => (prev.some(x => x.id === id) ? prev : [detail, ...prev]));
-      setFocusEventId(id);
-      setPage('smm-events');
-      cleanUrl();
-    }).catch((e: any) => {
-      // The linked event is gone or hidden: dead-link screen (the same
-      // behavior the tests' deep link has); transient failures stay silent.
-      if (String(e?.message || '').toLowerCase().includes('not found')) setDeadLink(true);
-      else cleanUrl();
-    });
-  });
-
-  // Shared REQUEST link (?request=<id>): open that запрос's card on the
-  // «Отправленные запросы» page — the запрос analogue of the ?event= link.
-  // Own запросы always open; foreign ones only when public (the server
-  // enforces the same rule on GET /api/smm/requests/[id]).
-  const sharedRequestHandledRef = useRef(false);
-  useEffect(() => {
-    if (sharedRequestHandledRef.current || !dataReady || !effectiveUser || effectivePage !== 'dashboard') return;
-    let raw: string | null = null;
-    try { raw = new URLSearchParams(window.location.search).get('request'); } catch { raw = null; }
-    if (!raw) return;
-    sharedRequestHandledRef.current = true;
-    const id = raw.trim().slice(0, 40);
-    const cleanUrl = () => { try { window.history.replaceState({}, '', window.location.pathname); } catch {} };
-    api.getSmmRequest(id).then((detail: any) => {
-      const own = detail.specialistId === effectiveUser.id;
-      setRequestsScope(own ? 'mine' : 'public');
-      setRequestsItems(prev => (prev.some(x => x.id === id) ? prev : [detail, ...prev]));
-      setFocusRequestId(id);
-      setPage('smm-requests');
-      cleanUrl();
-    }).catch(() => cleanUrl());
-  });
-
-  // Every open of the events page revalidates its feed in the background
-  // (the cached items paint first, the refresh slides in silently).
-  useEffect(() => {
-    if (effectivePage === 'smm-events' && effectiveUser) void refreshEventsFeed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectivePage]);
-
   // Header search (tests context): debounce 350ms, server-side /api/feed?q=
-  // In SMM mode the search filters the SMM feed LOCALLY instead (see
-  // dashboard-view) — the tests tag search stays out of the marketplace.
   useEffect(() => {
     if (effectivePage !== 'dashboard') return;
     const q = dashSearch.trim();
     if (q.length < 2) { setDashSearchResults(null); setDashTagInfo(null); setDashSearching(false); return; }
-    if (effectiveUser && !navNow().viewingUser && (navNow().dashView === 'tiktok1' || navNow().dashView === 'tiktok2')) {
-      // The SMM TikTok feed is active — the search filters it locally (see
-      // dashboard-view); the tests tag dropdown stays out of the marketplace.
-      setDashSearchResults(null); setDashTagInfo(null); setDashSearching(false); return;
-    }
     setDashSearching(true);
     let alive = true;
     const t = setTimeout(() => {
@@ -1515,16 +1330,13 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     try {
       let result;
       if (authMode === 'signup') {
-        result = await api.register({ email, name, password, smmRole: useSessionStore.getState().smmRole });
+        result = await api.register({ email, name, password });
       } else {
         result = await api.login({ email, password });
       }
       setUser(result);
       setUserState(result);
       setHydratedUser(result);
-      // SMM: fresh session → the bookmark cache + the role-aware feed
-      loadSmmBookmarks();
-      refreshSmmFeed();
       // The login/register response already set the httpOnly session cookie
       // (DB-backed) — the next visit pre-renders the dashboard shell.
       // Professional fresh-session boot: prefetch of the personal feed BEFORE
@@ -1667,90 +1479,8 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     resetTestFormStore();
   };
 
-  // ─── Event editor (the «+» action over the SMM feed) ────────────────────
-  // The customer's full-page event editor — the visual twin of the test
-  // editor: same header, same collapsible section cards, same bottom bar.
-  const [eventSaving, setEventSaving] = useState(false);
-  // The event-delete confirmation dialog id (the ladder's «Удалить» asks
-  // before the cascade removes roles/invites/apps/files).
-  const [deleteEventId, setDeleteEventId] = useState<string | null>(null);
-  const startCreateEvent = () => {
-    resetEventForm();
-    setPage('create-event');
-  };
-  const startEditEvent = (ev: any) => {
-    // OWNERSHIP (the brief): a customer edits ONLY the events they created.
-    // Somebody else's event never opens in the editor — a toast explains.
-    if (!effectiveUser) return;
-    if (ev.customerId !== effectiveUser.id) {
-      toast({ title: t('smmOnlyOwnEvents'), variant: 'destructive' });
-      return;
-    }
-    useEventEditorStore.setState({
-      evTitle: ev.title || '', evSummary: ev.summary || '', evBrief: ev.brief || '',
-      evDeadline: ev.deadline || '', evBudget: ev.budget || '', evRestrictions: ev.restrictions || '',
-      evKind: ev.kind === 'government' ? 'government' : 'business',
-      evCoverColor: ev.coverColor || '', evIsPublic: ev.isPublic !== false,
-      roles: (ev.roles || []).map((r: any) => ({ id: r.id, name: r.name || '', brief: r.brief || '', payment: r.payment || '', deadline: r.deadline || '' })),
-      editingEventId: ev.id, evFiles: [],
-      evInfoExpanded: true, evFilesExpanded: false, evCoverExpanded: false, evRolesExpanded: false,
-      evFileBusy: false,
-    });
-    api.getSmmFiles('event', ev.id)
-      .then((items: any[]) => useEventEditorStore.setState({ evFiles: items || [] }))
-      .catch(() => {});
-    setPage('create-event');
-  };
-  const handleSaveEvent = async () => {
-    const st = eventEditorNow();
-    if (!st.evTitle.trim() || eventSaving) return;
-    setEventSaving(true);
-    try {
-      const payload: any = {
-        title: st.evTitle.trim(), summary: st.evSummary, brief: st.evBrief,
-        deadline: st.evDeadline, budget: st.evBudget, restrictions: st.evRestrictions,
-        kind: st.evKind, coverColor: st.evCoverColor || null, isPublic: st.evIsPublic,
-      };
-      if (st.editingEventId) {
-        await api.updateSmmEvent(st.editingEventId, payload);
-        toast({ title: t('smmEventSavedToast') });
-      } else {
-        const created = await api.createSmmEvent({
-          ...payload,
-          roles: st.roles.filter(r => r.name.trim()).map(r => ({ name: r.name.trim(), brief: r.brief, payment: r.payment, deadline: r.deadline })),
-        });
-        toast({ title: t('smmEventCreated') });
-        // The fresh event lands at the top of the personal events library —
-        // no reload, the feed slides straight to it.
-        setEventsItems(prev => [{
-          ...created,
-          filesCount: 0,
-          pendingApplications: 0,
-          customer: effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, image: (effectiveUser as any).image || null } : null,
-          customerOtherEvents: [],
-        }, ...prev]);
-        setFocusEventId(created.id);
-      }
-      // The event may have joined/left the general library — the dashboard's
-      // SMM feed revalidates in the background.
-      void refreshSmmFeed();
-      setPage('smm-events');
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-    setEventSaving(false);
-  };
-
   const startCreateTest = () => {
     setViewingUser(null); // creating always happens in the user's own library
-    // Over the SMM TikTok feed the customer's «+» creates an EVENT (the
-    // full-page twin of this editor); over the tests grids (library/shelf —
-    // the tests site's own surface) it keeps creating TESTS.
-    const v = navNow().dashView;
-    if ((v === 'tiktok1' || v === 'tiktok2') && !navNow().viewingUser && mySmmRole === 'customer') {
-      startCreateEvent();
-      return;
-    }
     resetTestForm();
     setPage('create-test');
   };
@@ -2868,10 +2598,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   // carries the COUNT) and open the files window — the AI-window format.
   const openCardFiles = (test: any) => {
     if (!test?.id || dashFilesLoadingId === String(test.id)) return;
-    // SMM entity (event «smm-e:<id>» / specialist «smm-u:<id>»)? Their files
-    // live in the polymorphic SmmFile table — the same window, another source.
-    const smmKind0 = String(test.id).startsWith('smm-e:') ? 'event' : String(test.id).startsWith('smm-u:') ? 'specialist' : null;
-    if (smmKind0) { return openSmmFiles(smmKind0 as 'event' | 'specialist', test); }
     setAiCardTestId(null); // one dashboard window at a time
     setDashGroupTestId(null); // ...the group chat window yields too
     stashDashWindowTest(test);
@@ -2900,11 +2626,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   // account, the same rule the taking screen's chat button follows.
   const openCardGroupChat = (test: any) => {
     if (!test?.id) return;
-    // SMM entity? The chat scope is the event / the specialist, not a test.
-    const gid0 = String(test.id);
-    if (gid0.startsWith('smm-e:') || gid0.startsWith('smm-u:')) {
-      return openSmmGroupChat(gid0.startsWith('smm-e:') ? 'event' : 'specialist', test);
-    }
     // setRegisterWall directly — the `wall` helper lives below the dashboard
     // early-return, so referencing it here would trip the TDZ on click.
     if (isGuestNow()) { setRegisterWall('chat'); return; }
@@ -2921,468 +2642,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     setDashGroupTestId(null);
     setGroupMessages([]);
     setGroupInput('');
-  };
-
-  // ─── SMM openers ────────────────────────────────────────────────────────
-  // Group chat about an SMM entity: the SAME window + polling as the per-test
-  // chat, keyed by the «smm-e:<id>» / «smm-u:<id>» scope prefix.
-  const openSmmGroupChat = (kind: 'event' | 'specialist', entity: any) => {
-    if (isGuestNow()) { setRegisterWall('chat'); return; }
-    setAiCardTestId(null);
-    setDashFilesOpen(false);
-    setEditOpen(false);
-    setGroupMessages([]);
-    setGroupInput('');
-    dashGroupTitleRef.current = kind === 'event' ? String(entity?.title || '') : String(entity?.name || '');
-    stashDashWindowTest({ ...entity, smmKind: kind });
-    setDashGroupTestId(`smm-${kind === 'event' ? 'e' : 'u'}:${entity.id}`);
-  };
-  // Files of an SMM entity (the polymorphic SmmFile table) — the SAME window
-  // format as the test files window.
-  const openSmmFiles = (kind: 'event' | 'specialist', entity: any) => {
-    const raw = String(entity?.id || '');
-    const rawId = raw.includes(':') ? raw.slice(raw.indexOf(':') + 1) : raw;
-    if (!rawId) return;
-    setAiCardTestId(null);
-    setDashGroupTestId(null);
-    stashDashWindowTest({ ...entity, smmKind: kind });
-    const title = kind === 'event' ? String(entity?.title || '') : String(entity?.name || '');
-    setDashFilesLoadingId(rawId);
-    setLoading(true);
-    api.getSmmFiles(kind === 'event' ? 'event' : 'user', rawId)
-      .then((items: any[]) => {
-        setDashFiles({ testId: `smm-${kind === 'event' ? 'e' : 'u'}:${rawId}`, title, items: (items || []).filter(Boolean) });
-        setDashFilesOpen(true);
-      })
-      .catch((e: any) => toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' }))
-      .finally(() => { setDashFilesLoadingId(null); setLoading(false); });
-  };
-  // «Подать заявку» (specialist → event) / «Пригласить» (customer →
-  // specialist): the wizard in the same full-screen window the question
-  // cards used. invite preloads the customer's own events for the pick.
-  const openSmmWizard = async (mode: 'invite' | 'apply' | 'send', target: any) => {
-    if (isGuestNow()) { setRegisterWall('home'); return; }
-    const st = useSmmStore.getState();
-    st.setWizardMode(mode);
-    st.setWizardSpecialist(mode === 'invite' ? target : null);
-    st.setWizardEvent(mode === 'apply' ? target : null);
-    st.setSelEventId(null);
-    st.setSelRoleId(null);
-    st.setWizardMessage('');
-    st.setWizardStep(0);
-    st.setWizardBusy(false);
-    st.setInvitePickSpecialist(false); // the specialist is preset — no pick stage
-    st.setSpecialistCandidates([]);
-    if (mode === 'invite') {
-      try {
-        const evs = await api.getMySmmEvents();
-        st.setMyEvents(evs || []);
-        if ((evs || []).length === 1) st.setSelEventId(evs[0].id);
-      } catch { st.setMyEvents([]); }
-    }
-    if (mode === 'send') {
-      // The SEND flow picks one of the specialist's own запросы
-      st.setSelRequestId(null);
-      try {
-        const mine = await api.getSmmRequests('mine');
-        st.setWizardRequests(mine || []);
-      } catch { st.setWizardRequests([]); }
-    }
-    setPage('smm-wizard');
-  };
-  // Personal-library pin for SMM entities (customer pins specialists,
-  // specialist pins events) — optimistic, like the test bookmarks.
-  const toggleSmmBookmark = async (kind: 'specialist' | 'event' | 'request' | 'role', id: string) => {
-    if (isGuestNow()) { setRegisterWall('home'); return; }
-    const st = useSmmStore.getState();
-    const curList = kind === 'specialist' ? st.smmBmSpecialists
-      : kind === 'event' ? st.smmBmEvents
-      : kind === 'request' ? st.smmBmRequests
-      : st.smmBmRoles;
-    const has = curList.includes(id);
-    const nextList = has ? curList.filter(x => x !== id) : [...curList, id];
-    if (kind === 'specialist') st.setSmmBmSpecialists(nextList);
-    else if (kind === 'event') st.setSmmBmEvents(nextList);
-    else if (kind === 'request') st.setSmmBmRequests(nextList);
-    else st.setSmmBmRoles(nextList);
-    try {
-      if (has) await api.removeSmmBookmark(kind, id);
-      else await api.addSmmBookmark(kind, id);
-      if (!navNow().discoverMode && (kind === 'specialist' || kind === 'event')) refreshSmmFeed('mine');
-    } catch (e: any) {
-      if (kind === 'specialist') st.setSmmBmSpecialists(curList);
-      else if (kind === 'event') st.setSmmBmEvents(curList);
-      else if (kind === 'request') st.setSmmBmRequests(curList);
-      else st.setSmmBmRoles(curList);
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-  // Wizard confirmation («Подтвердить»): send the invitation / application →
-  // back to the feed — the ending the brief describes. Invites opened from
-  // the events page return there (and refresh its feed).
-  const confirmSmmWizard = async () => {
-    const st = smmNow();
-    if (st.wizardBusy) return;
-    if (st.wizardMode === 'invite') {
-      if (!st.selEventId || !st.selRoleId || !st.wizardSpecialist) return;
-    } else {
-      if (!st.wizardEvent?.id || !st.selRoleId) return;
-    }
-    const fromEventsPage = st.invitePickSpecialist;
-    st.setWizardBusy(true);
-    try {
-      if (st.wizardMode === 'invite') {
-        await api.createSmmInvitation({ eventId: st.selEventId!, roleId: st.selRoleId!, specialistId: st.wizardSpecialist!.id, message: st.wizardMessage });
-        toast({ title: t('smmInviteSentTitle'), description: t('smmInviteSentDesc') });
-      } else if (st.wizardMode === 'send') {
-        // The structured запрос goes to the event's role — the application
-        // carries the requestId so the customer sees the full step structure.
-        await api.createSmmApplication({ eventId: st.wizardEvent!.id, roleId: st.selRoleId!, requestId: st.selRequestId || undefined, message: st.wizardMessage });
-        toast({ title: t('smmRequestSentTitle'), description: t('smmRequestSentDesc') });
-      } else {
-        await api.createSmmApplication({ eventId: st.wizardEvent!.id, roleId: st.selRoleId!, message: st.wizardMessage });
-        toast({ title: t('smmApplicationSentTitle'), description: t('smmApplicationSentDesc') });
-      }
-      st.setWizardMode(null);
-      st.setWizardSpecialist(null);
-      st.setWizardEvent(null);
-      st.setSelEventId(null);
-      st.setSelRoleId(null);
-      st.setWizardMessage('');
-      st.setWizardStep(0);
-      st.setInvitePickSpecialist(false);
-      st.setSpecialistCandidates([]);
-      st.setSelRequestId(null);
-      st.setWizardRequests([]);
-      const fromRequests = st.wizardMode === 'send';
-      setPage(fromEventsPage ? 'smm-events' : fromRequests ? 'smm-requests' : 'dashboard');
-      refreshSmmFeed();
-      if (fromEventsPage) void refreshEventsFeed();
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-    st.setWizardBusy(false);
-  };
-  const gotoSmmPage = (p: 'smm-events' | 'smm-inbox' | 'smm-requests' | 'smm-roles' | 'smm-mail' | 'smm-library') => setPage(p);
-  // The specialist dock's «Личная | Публичная библиотека» tabs: preset the
-  // scope, then open the library page (real page tabs — one tap, one page).
-  const gotoSmmLibrary = (scope: 'mine' | 'discover') => {
-    useSmmStore.getState().setLibraryScope(scope);
-    setPage('smm-library');
-  };
-
-  // ═══════════════════ LIBRARY (specialist) handlers ══════════════════════
-  // scope=mine → the BOOKMARKED events (закладки мероприятий), discover →
-  // the whole open library. The same kind=events feed the customer's events
-  // page uses — the API returns the right slice for the specialist role.
-  const [libraryItems, setLibraryItems] = useState<any[]>([]);
-  const [libraryLoading, setLibraryLoading] = useState(false);
-  const libraryScope = useSmmStore(s => s.libraryScope);
-  const libraryScopeRef = useRef(libraryScope);
-  libraryScopeRef.current = libraryScope;
-  const refreshLibraryFeed = useCallback(async (scopeOverride?: 'mine' | 'discover') => {
-    const st = useSessionStore.getState();
-    const uid = st.user?.id || st.hydratedUser?.id;
-    if (!uid) return;
-    const scope = scopeOverride || libraryScopeRef.current;
-    setLibraryLoading(true);
-    try {
-      const feed = await api.getSmmFeed({ scope, limit: 30, kind: 'events' });
-      setLibraryItems(feed.items || []);
-    } catch { /* transient */ }
-    setLibraryLoading(false);
-  }, []);
-  const changeLibraryScope = useCallback((s2: 'mine' | 'discover') => {
-    useSmmStore.getState().setLibraryScope(s2);
-    libraryScopeRef.current = s2;
-    void refreshLibraryFeed(s2);
-  }, [refreshLibraryFeed]);
-  useEffect(() => {
-    if (effectivePage === 'smm-library' && effectiveUser) void refreshLibraryFeed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectivePage === 'smm-library', effectiveUser?.id, libraryScope]);
-
-  // ═════════════════════════ ЗАПРОС handlers ══════════════════════════════
-  const refreshRequests = useCallback(async (scopeOverride?: 'mine' | 'public') => {
-    const scope = scopeOverride || requestsScope;
-    setRequestsLoading(true);
-    try {
-      setRequestsItems(await api.getSmmRequests(scope));
-    } catch { /* transient */ }
-    setRequestsLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestsScope]);
-
-  const changeRequestsScope = useCallback((s2: 'mine' | 'public') => {
-    setRequestsScope(s2);
-    void refreshRequests(s2);
-  }, [refreshRequests]);
-
-  // The «Отправленные запросы» page refreshes whenever it opens
-  useEffect(() => {
-    if (effectivePage === 'smm-requests' && effectiveUser) void refreshRequests();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectivePage === 'smm-requests', effectiveUser?.id]);
-
-  const startCreateRequest = () => {
-    resetRequestForm();
-    setPage('smm-request-editor');
-  };
-
-  const startEditRequest = async (rq: any) => {
-    try {
-      const fresh = await api.getSmmRequest(rq.id);
-      resetRequestForm();
-      useRequestEditorStore.setState({
-        rqTitle: fresh.title || '',
-        rqSummary: fresh.summary || '',
-        rqCoverColor: fresh.coverColor || '',
-        rqIsPublic: !!fresh.isPublic,
-        steps: (fresh.steps || []).map((st: any) => ({ id: st.id, title: st.title || '', hint: st.hint || '', answer: st.answer || '' })),
-        editingRequestId: fresh.id,
-        rqStepsExpanded: true,
-      });
-      setPage('smm-request-editor');
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  const handleSaveRequest = async () => {
-    if (requestSaving) return;
-    const st = requestEditorNow();
-    if (!st.rqTitle.trim()) return;
-    setRequestSaving(true);
-    try {
-      const payload = {
-        title: st.rqTitle.trim(),
-        summary: st.rqSummary,
-        coverColor: st.rqCoverColor || null,
-        coverIcon: null as string | null,
-        isPublic: st.rqIsPublic,
-        steps: st.steps.map((st2: any) => ({ title: st2.title, hint: st2.hint, answer: st2.answer })),
-      };
-      if (st.editingRequestId) {
-        await api.updateSmmRequest(st.editingRequestId, payload);
-        toast({ title: t('smmRequestSavedToast') });
-        setFocusRequestId(st.editingRequestId);
-      } else {
-        const created = await api.createSmmRequest(payload);
-        toast({ title: t('smmRequestCreated') });
-        setFocusRequestId(created.id);
-      }
-      setRequestsScope('mine');
-      await refreshRequests('mine');
-      setPage('smm-requests');
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-    setRequestSaving(false);
-  };
-
-  const doShareRequestLink = async (rq: any) => {
-    try {
-      await api.shareSmmRequest(rq.id, 'link');
-      const link = `${window.location.origin}/?request=${rq.id}`;
-      try { await navigator.clipboard.writeText(link); toast({ title: t('linkCopied') }); }
-      catch { toast({ title: link }); }
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  const doMakeRequestPublic = async (rq: any) => {
-    try {
-      const res = await api.shareSmmRequest(rq.id, 'community');
-      setRequestsItems(prev => prev.map(x => (x.id === rq.id ? { ...x, isPublic: res.isPublic } : x)));
-      toast({ title: res.isPublic ? t('smmMakePublicBtn') : t('smmMakeLinkOnly') });
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  const confirmDeleteRequest = async () => {
-    const id = deleteRequestId;
-    setDeleteRequestId(null);
-    if (!id) return;
-    try {
-      await api.deleteSmmRequest(id);
-      setRequestsItems(prev => prev.filter(x => x.id !== id));
-      toast({ title: t('smmRequestDeleted') });
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  // «Взять шаблон» on a foreign PUBLIC запрос: copies the structure into the
-  // specialist's own library (the template economy — take, adapt, send).
-  const takeRequestTemplate = async (rq: any) => {
-    if (isGuestNow()) { setRegisterWall('home'); return; }
-    try {
-      const fresh = await api.getSmmRequest(rq.id);
-      const created = await api.createSmmRequest({
-        title: fresh.title,
-        summary: fresh.summary || '',
-        coverColor: fresh.coverColor || null,
-        isPublic: false,
-        steps: (fresh.steps || []).map((st: any) => ({ title: st.title, hint: st.hint, answer: st.answer || '' })),
-      });
-      toast({ title: t('smmRequestCreated') });
-      setRequestsScope('mine');
-      await refreshRequests('mine');
-      setFocusRequestId(created.id);
-      setPage('smm-requests');
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  // ── The FILLING screen (the test-taking twin) ──
-  const startFillRequest = async (rq: any) => {
-    try {
-      const fresh = await api.getSmmRequest(rq.id);
-      setFillRequest(fresh);
-      setPage('smm-request-fill');
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  const handleFillAnswerChange = (stepId: string, answer: string) => {
-    setFillRequest((prev: any) => prev ? { ...prev, steps: prev.steps.map((st: any) => (st.id === stepId ? { ...st, answer } : st)) } : prev);
-  };
-
-  const handleFillSaveAnswers = async () => {
-    if (!fillRequest || fillBusy) return;
-    setFillBusy(true);
-    try {
-      await api.updateSmmRequest(fillRequest.id, {
-        steps: (fillRequest.steps || []).map((st: any) => ({ title: st.title, hint: st.hint, answer: st.answer || '' })),
-      });
-      toast({ title: t('smmFillSaved') });
-      setRequestsScope('mine');
-      await refreshRequests('mine');
-      setFocusRequestId(fillRequest.id);
-      setFillRequest(null);
-      setPage('smm-requests');
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-    setFillBusy(false);
-  };
-
-  // «Отправить запрос» — the SEND wizard (запрос → роль → сообщение → обзор)
-  const openSmmSendWizard = async (target: any) => {
-    if (isGuestNow()) { setRegisterWall('home'); return; }
-    const st = smmNow();
-    st.setWizardMode('send');
-    st.setWizardSpecialist(null);
-    st.setWizardEvent(target);
-    st.setSelEventId(null);
-    st.setSelRoleId(null);
-    st.setWizardMessage('');
-    st.setWizardStep(0);
-    st.setWizardBusy(false);
-    st.setInvitePickSpecialist(false);
-    st.setSpecialistCandidates([]);
-    st.setSelRequestId(null);
-    try {
-      const mine = await api.getSmmRequests('mine');
-      st.setWizardRequests(mine || []);
-    } catch { st.setWizardRequests([]); }
-    setPage('smm-wizard');
-  };
-
-  // ── РОЛИ handlers (the customer's «Личные роли» / «Общие роли») ──
-  const refreshRoles = useCallback(async (scopeOverride?: 'mine' | 'public') => {
-    const scope = scopeOverride || rolesScope;
-    setRolesLoading(true);
-    try {
-      setRolesItems(await api.getSmmRoles(scope));
-    } catch { /* transient */ }
-    setRolesLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rolesScope]);
-
-  const changeRolesScope = useCallback((s2: 'mine' | 'public') => {
-    setRolesScope(s2);
-    void refreshRoles(s2);
-  }, [refreshRoles]);
-
-  useEffect(() => {
-    if (effectivePage === 'smm-roles' && effectiveUser) {
-      // The dock preset wins: «Личные роли»/«Общие роли» buttons carry the
-      // scope they want the page to open with.
-      const preset = smmNow().rolesScopeRequest;
-      setRolesScope(preset);
-      void refreshRoles(preset);
-      api.getMySmmEvents().then((evs: any[]) => setMyEventsCache(evs || [])).catch(() => setMyEventsCache([]));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectivePage === 'smm-roles', effectiveUser?.id]);
-
-  const doShareRoleTemplate = async (role: any) => {
-    try {
-      const next = !role.isPublic;
-      await api.updateSmmRole(role.id, { isPublic: next });
-      setRolesItems(prev => prev.map(x => (x.id === role.id ? { ...x, isPublic: next } : x)));
-      toast({ title: next ? t('smmShareRoleTpl') : t('smmUnshareRoleTpl') });
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  const doAttachRoleTemplate = async (roleId: string, eventId: string) => {
-    try {
-      await api.attachSmmRoleTemplate(roleId, eventId);
-      toast({ title: t('smmRoleTplAdded') });
-      void refreshRoles();
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  const doDeleteRoleTemplate = async (role: any) => {
-    try {
-      await api.deleteSmmRole(role.id);
-      setRolesItems(prev => prev.filter(x => x.id !== role.id));
-      toast({ title: t('smmRequestDeleted') });
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-  };
-
-  const doEditRoleInline = async (role: any) => {
-    // A prompt-free inline edit is heavy; route to the event's manage window
-    // (the roles tab) — the exact surface the customer edits roles on.
-    if (role.event?.id) {
-      changeEventsScope('mine');
-      setPage('smm-events');
-    }
-  };
-
-  // ── The ACCOUNT SWITCHER (заказчик ↔ SMM-специалист) — the top-panel
-  // button styled like the language switcher: one tap cycles the account
-  // kind, persisted via PUT /api/smm/profile, the feed re-resolves.
-  const [switchingRole, setSwitchingRole] = useState(false);
-  const switchSmmRole = async () => {
-    if (switchingRole || !effectiveUser) return;
-    const next = mySmmRole === 'customer' ? 'specialist' : 'customer';
-    setSwitchingRole(true);
-    try {
-      await api.switchSmmRole(next);
-      const patch = { ...effectiveUser, smmRole: next } as any;
-      setUser({ id: patch.id, email: patch.email, name: patch.name, smmRole: next });
-      useSessionStore.getState().setUser(patch);
-      useSessionStore.getState().setHydratedUser(patch);
-      toast({ title: next === 'customer' ? t('smmSwitchedCustomer') : t('smmSwitchedSpecialist') });
-      // The feed kind flips with the account: re-resolve both SMM feeds
-      setRequestsItems([]); setRolesItems([]);
-      refreshSmmFeed();
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-    setSwitchingRole(false);
   };
   // The window's open effect: resume the test's most recent thread — or
   // spawn a fresh (empty, unsaved) one, «Новый чат» style. No passport.
@@ -3447,19 +2706,7 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     }
     setChatLoading(true);
     try {
-      // SMM entity threads («smm-u:<id>» specialist / «smm-e:<id>» event /
-      // «smm-r:<id>» запрос)? The AI prompt is built server-side from that
-      // entity's data; otherwise it's the whole-test tutor.
-      const tidStr = String(testId);
-      const result = tidStr.startsWith('smm-u:')
-        ? await api.chatAboutSpecialist(tidStr.slice(5), newMsgs)
-        : tidStr.startsWith('smm-e:')
-          ? await api.chatAboutEvent(tidStr.slice(5), newMsgs)
-          : tidStr.startsWith('smm-r:')
-            ? await api.chatAboutRequest(tidStr.slice(5), newMsgs)
-            : tidStr.startsWith('smm-role:')
-              ? await api.chatAboutRole(tidStr.slice(9), newMsgs)
-              : await api.chatAboutTest(testId, newMsgs);
+      const result = await api.chatAboutTest(testId, newMsgs);
       if (result.response) {
         const assistantMsg = { role: 'assistant' as const, content: result.response };
         const finalMsgs = [...newMsgs, assistantMsg];
@@ -3574,18 +2821,13 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   }, [groupOpen, currentTest]);
 
   // Dashboard group chat window: the SAME serverless-safe polling, keyed on
-  // the card's test instead of the taking screen's one. SMM entities (the
-  // «smm-e:» / «smm-u:» prefixes) poll the polymorphic SMM chat instead.
+  // the card's test instead of the taking screen's one.
   useEffect(() => {
     if (!dashGroupTestId) return;
-    const smmScope: 'event' | 'specialist' | null = dashGroupTestId.startsWith('smm-e:') ? 'event' : dashGroupTestId.startsWith('smm-u:') ? 'specialist' : null;
-    const smmScopeId = smmScope ? dashGroupTestId.slice(dashGroupTestId.indexOf(':') + 1) : '';
     let stop = false;
     const poll = async () => {
       try {
-        const msgs = smmScope
-          ? await api.getSmmMessages(smmScope, smmScopeId)
-          : await api.getGroupMessages(dashGroupTestId);
+        const msgs = await api.getGroupMessages(dashGroupTestId);
         if (!stop && Array.isArray(msgs)) setGroupMessages(msgs);
       } catch { /* transient network errors are fine — next tick retries */ }
     };
@@ -3624,10 +2866,7 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     setGroupInput('');
     setGroupSending(true);
     try {
-      const smmScope: 'event' | 'specialist' | null = dashGroupTestId.startsWith('smm-e:') ? 'event' : dashGroupTestId.startsWith('smm-u:') ? 'specialist' : null;
-      const saved = smmScope
-        ? await api.sendSmmMessage(smmScope, dashGroupTestId.slice(dashGroupTestId.indexOf(':') + 1), text)
-        : await api.sendGroupMessage(dashGroupTestId, text);
+      const saved = await api.sendGroupMessage(dashGroupTestId, text);
       setGroupMessages(prev => (prev.some(m => m.id === saved.id) ? prev : [...prev, saved]));
     } catch (e: any) {
       toast({ title: 'Error', description: e.message || 'Failed to send message', variant: 'destructive' });
@@ -3871,91 +3110,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     } finally {
       setShareBusy(false);
     }
-  };
-
-  // ─── Event share / publish / delete — the exact analogues of the tests'
-  // share trio, scoped to the events page. A customer shares and publishes
-  // only their OWN events (server-enforced too); the link works for anyone.
-  const copyEventLink = async (ev: any) => {
-    const url = `${window.location.origin}/?event=${ev.id}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      toast({ title: t('linkCopied') });
-    } catch {
-      toast({ title: t('error'), description: url, variant: 'destructive' });
-    }
-  };
-  const doShareEventLink = async (ev: any) => {
-    // «Приватная ссылка» — copies the direct event link (?event=<id>);
-    // the link opens the event for anyone who has it.
-    await copyEventLink(ev);
-  };
-  const doMakeEventPublic = async (ev: any) => {
-    if (effectiveUser && ev.customerId !== effectiveUser.id) {
-      toast({ title: t('smmOnlyOwnEvents'), variant: 'destructive' });
-      return;
-    }
-    setShareBusy(true);
-    try {
-      const r = await api.shareSmmEvent(ev.id, 'community');
-      // Mirror the flip into the events page list without a reload
-      setEventsItems(prev => prev.map(x => (x.id === ev.id ? { ...x, isPublic: r.isPublic } : x)));
-      toast({ title: r.isPublic ? t('shareMadePublic') : t('shareMadeLink') });
-      // The general library membership changed — the feeds revalidate
-      void refreshSmmFeed();
-      void refreshEventsFeed();
-      await copyEventLink(ev);
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    } finally {
-      setShareBusy(false);
-    }
-  };
-  const requestDeleteEvent = (ev: any) => {
-    if (effectiveUser && ev.customerId !== effectiveUser.id) {
-      toast({ title: t('smmOnlyOwnEvents'), variant: 'destructive' });
-      return;
-    }
-    setDeleteEventId(ev.id);
-  };
-  const handleDeleteEvent = async () => {
-    if (!deleteEventId) return;
-    try {
-      await api.deleteSmmEvent(deleteEventId);
-      toast({ title: t('smmEventDeleted') });
-      setEventsItems(prev => prev.filter(x => x.id !== deleteEventId));
-      void refreshSmmFeed();
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
-    }
-    setDeleteEventId(null);
-  };
-
-  // «Пригласить специалиста» FROM the events page: the event is preset, the
-  // wizard gains the «specialist» pick stage (event → role → WHO → message).
-  const openSmmInviteForEvent = async (ev: any) => {
-    if (isGuestNow()) { setRegisterWall('home'); return; }
-    if (effectiveUser && ev.customerId !== effectiveUser.id) {
-      toast({ title: t('smmOnlyOwnEvents'), variant: 'destructive' });
-      return;
-    }
-    const st = useSmmStore.getState();
-    st.setWizardMode('invite');
-    st.setWizardSpecialist(null); // picked inside the wizard's specialist stage
-    st.setWizardEvent(ev);
-    st.setSelEventId(ev.id);
-    st.setSelRoleId(null);
-    st.setWizardMessage('');
-    st.setWizardStep(0);
-    st.setWizardBusy(false);
-    st.setMyEvents([{ ...ev, roles: ev.roles || [] }]);
-    st.setInvitePickSpecialist(true);
-    st.setSpecialistCandidates([]);
-    setPage('smm-wizard');
-    // The candidates come from the general specialists feed (fetched once)
-    api.getSmmFeed({ scope: 'discover', limit: 50 })
-      .then((f: any) => { if (f?.kind === 'specialists') useSmmStore.getState().setSpecialistCandidates(f.items || []); })
-      .catch(() => {});
   };
 
   // Jump to a test from the search dropdown: scroll to it if already loaded,
@@ -4753,18 +3907,10 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     }] : []),
     { key: 'ai', label: t('aiTutor'), icon: <MessageSquare className="w-3.5 h-3.5" />, active: !!aiCardTestId },
     { key: 'group' as const, label: t('chat'), icon: <MessageCircle className="w-3.5 h-3.5" />, active: !!dashGroupTestId },
-    // «Изменить» — TEST-only: SMM windows (event / specialist) never offer it
-    ...(((dashWindowTestRef.current as any)?.smmKind) ? [] : [{
-      key: 'edit' as const,
-      label: t('editTest'),
-      icon: <Pencil className="w-3.5 h-3.5" />,
-      active: editOpen,
-    }]),
+    { key: 'edit' as const, label: t('editTest'), icon: <Pencil className="w-3.5 h-3.5" />, active: editOpen },
   ];
   const dashSwitcher = { options: dashSheetOptions, onSelect: (key: string) => {
     if (key === 'edit') {
-      // SMM entities have no editor (the brief: no «Изменить» on SMM cards)
-      if ((dashWindowTestRef.current as any)?.smmKind) return;
       // the edit window for the SAME test the switcher lives on — the stashed
       // card test keeps the creatorId for the copy-on-edit path
       setDashFilesOpen(false);
@@ -4819,18 +3965,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
           openFilesCard={openFilesCard}
           cycleDashView={cycleDashView}
           toggleDiscoverMode={toggleDiscoverMode}
-          smmFeed={smmFeed}
-          smmLoading={smmLoading}
-          smmBmSpecialists={smmBmSpecialists}
-          smmBmEvents={smmBmEvents}
-          mySmmRole={mySmmRole}
-          openSmmWizard={openSmmWizard}
-          toggleSmmBookmark={toggleSmmBookmark}
-          gotoSmmPage={gotoSmmPage}
-          onCreateRequest={startCreateRequest}
-          gotoRequestsWithEdit={() => { useSmmStore.getState().setRequestsEditMode(true); setPage('smm-requests'); }}
-          onSwitchSmmRole={switchSmmRole}
-          switchingRole={switchingRole}
         />
         {/* THE DASHBOARD AI WINDOW — «Обсудить с ИИ»: opens STRAIGHT INTO the
         conversation (the test's most recent thread, or a fresh one); the AI
@@ -5014,259 +4148,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
         startTest={startTest}
         continueTestWith={continueTestWith}
         goHome={goHome}
-      />
-    );
-  }
-
-  // SMM WIZARD — «Подать заявку / Пригласить» in the same full-screen window
-  // the question cards used: stages as slides, the bottom panel switches and
-  // confirms, the review is the swipeable results-style run of cards.
-  if (effectivePage === 'smm-wizard' && smmNow().wizardMode) {
-    return (
-      <SmmWizardView
-        goHome={() => setPage('dashboard')}
-        onConfirm={confirmSmmWizard}
-        onCreateEvent={() => setPage('smm-events')}
-      />
-    );
-  }
-  // CREATE / EDIT EVENT — the full-page editor, the visual twin of the test
-  // editor (create-edit-view): the customer creates events with the SAME
-  // UX the tests have, only the text is different.
-  if (effectivePage === 'create-event') {
-    return (
-      <SmmEventEditorView
-        goHome={() => setPage('smm-events')}
-        handleSaveEvent={handleSaveEvent}
-        busy={eventSaving}
-      />
-    );
-  }
-  // SMM EVENTS — the customer's events page, the dashboard's twin: the same
-  // top panel and dock, the same TikTok / library / shelf views with EVENT
-  // cards, the ownership-scoped edit/share/publish/delete ladder and the
-  // «Пригласить специалиста» wizard entry.
-  if (effectivePage === 'smm-events') {
-    return (
-      <>
-        <SmmEventsView
-          user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '', image: (effectiveUser as any).image || null } : null}
-          myAvatar={myAvatar}
-          events={eventsItems}
-          eventsLoading={eventsLoading}
-          pinnedEventIds={smmBmEvents}
-          scope={eventsScope}
-          onScopeChange={changeEventsScope}
-          focusEventId={focusEventId}
-          goHome={() => setPage('dashboard')}
-          onCreateEvent={startCreateEvent}
-          onEditEvent={startEditEvent}
-          onDeleteEvent={requestDeleteEvent}
-          onShareEvent={doShareEventLink}
-          onPublicEvent={doMakeEventPublic}
-          onInvite={openSmmInviteForEvent}
-          onChat={(ev: any) => openSmmGroupChat('event', ev)}
-          onFiles={(ev: any) => openSmmFiles('event', ev)}
-          onToggleBookmark={(id: string) => void toggleSmmBookmark('event', id)}
-          onOpenProfileUser={(u: any) => openUserLibrary(u)}
-          onOpenOtherEvent={(o: any) => {
-            // The event card's «customer's other events» row: jump to THAT
-            // event — switch to the general library, fetch it if missing.
-            changeEventsScope('discover');
-            setEventsItems(prev => {
-              if (prev.some(x => x.id === o.id)) return prev;
-              api.getSmmEvent(o.id).then((detail: any) => {
-                setEventsItems(p => (p.some(x => x.id === o.id) ? p : [detail, ...p]));
-                setFocusEventId(o.id);
-              }).catch(() => {});
-              return prev;
-            });
-            setFocusEventId(o.id);
-          }}
-          onOpenProfilePage={() => setPage('profile')}
-          onCycleLang={cycleLang}
-          onGotoRoles={(rs: 'mine' | 'public') => { useSmmStore.getState().setRolesScopeRequest(rs); setPage('smm-roles'); }}
-          onGotoMail={() => setPage('smm-mail')}
-        />
-        <AlertDialog open={!!deleteEventId} onOpenChange={() => setDeleteEventId(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('smmDeleteEventQ')}</AlertDialogTitle>
-              <AlertDialogDescription>{t('smmDeleteEventWarning')}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDeleteEvent} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('delete')}</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </>
-    );
-  }
-  // SMM INBOX — «Принятые запросы»: the requests the specialist RECEIVED
-  // (invitations from customers) + the statuses of the sent ones. The same
-  // top panel + the same specialist dock as every other specialist page.
-  if (effectivePage === 'smm-inbox') {
-    return (
-      <SmmInboxView
-        goHome={() => setPage('dashboard')}
-        gotoLibrary={gotoSmmLibrary}
-        gotoRequests={() => setPage('smm-requests')}
-        onCreateRequest={startCreateRequest}
-        onEditRequests={() => { useSmmStore.getState().setRequestsEditMode(true); setPage('smm-requests'); }}
-        onCycleLang={cycleLang}
-      />
-    );
-  }
-
-  // SMM REQUESTS — «Отправленные запросы»: my запросы + the public templates
-  // library. The dashboard's twin with the request cards (the full ladder).
-  if (effectivePage === 'smm-requests') {
-    return (
-      <SmmRequestsView
-        user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '' } : null}
-        myAvatar={myAvatar}
-        requests={requestsItems}
-        loading={requestsLoading}
-        scope={requestsScope}
-        onScopeChange={changeRequestsScope}
-        pinnedRequestIds={smmBmRequests}
-        focusRequestId={focusRequestId}
-        initialEditMode={requestsEditModeFlag}
-        onInitialEditConsumed={() => useSmmStore.getState().setRequestsEditMode(false)}
-        goHome={() => setPage('dashboard')}
-        onCreateRequest={startCreateRequest}
-        onEditRequest={startEditRequest}
-        onDeleteRequest={(rq: any) => setDeleteRequestId(rq.id)}
-        onShareRequest={doShareRequestLink}
-        onPublicRequest={doMakeRequestPublic}
-        onTakeTemplate={takeRequestTemplate}
-        onFillRequest={startFillRequest}
-        onSendRequest={openSmmSendWizard}
-        onChat={(rq: any) => openSmmGroupChat('specialist', { id: rq.specialistId || rq.specialist?.id, name: rq.specialist?.name || rq.title })}
-        onAiChat={(rq: any) => openAiDiscuss({ ...rq, id: `smm-r:${rq.id}`, title: rq.title, smmKind: 'request' })}
-        onToggleBookmark={(id: string) => void toggleSmmBookmark('request', id)}
-        onOpenProfileUser={(u: any) => openUserLibrary(u)}
-        onOpenProfilePage={() => setPage('profile')}
-        onCycleLang={cycleLang}
-        gotoLibrary={gotoSmmLibrary}
-        gotoInbox={() => setPage('smm-inbox')}
-      />
-    );
-  }
-
-  // SMM REQUEST EDITOR — the «+» / «изменить» full-page editor, the visual
-  // twin of the test editor (title, summary, cover, steps, save bar).
-  if (effectivePage === 'smm-request-editor') {
-    return (
-      <SmmRequestEditorView
-        goHome={() => setPage('smm-requests')}
-        handleSaveRequest={handleSaveRequest}
-        busy={requestSaving}
-      />
-    );
-  }
-
-  // SMM REQUEST FILL — the test-taking twin: one STEP CARD per slide, the
-  // answers save on the last slide.
-  if (effectivePage === 'smm-request-fill') {
-    return (
-      <SmmRequestFillView
-        request={fillRequest}
-        busy={fillBusy}
-        onAnswerChange={handleFillAnswerChange}
-        onSaveAnswers={handleFillSaveAnswers}
-        goHome={() => { setFillRequest(null); setPage('smm-requests'); }}
-      />
-    );
-  }
-
-  // SMM ROLES — the customer's «Личные роли» (their roles across their
-  // events) + «Общие роли» (public task templates people share).
-  if (effectivePage === 'smm-roles') {
-    return (
-      <SmmRolesView
-        user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '' } : null}
-        myAvatar={myAvatar}
-        roles={rolesItems}
-        loading={rolesLoading}
-        scope={rolesScope}
-        onScopeChange={changeRolesScope}
-        myEvents={myEventsCache}
-        goHome={() => setPage('dashboard')}
-        onCreateEvent={startCreateEvent}
-        onEditRole={doEditRoleInline}
-        onDeleteRole={doDeleteRoleTemplate}
-        onShareRole={doShareRoleTemplate}
-        onAttachRole={(role: any, eventId: string) => doAttachRoleTemplate(role.id, eventId)}
-        onOpenEvent={(ev: any) => { changeEventsScope('mine'); setEventsItems(prev => (prev.some(x => x.id === ev.id) ? prev : prev)); setFocusEventId(ev.id); setPage('smm-events'); }}
-        onChat={(role: any) => openSmmGroupChat('event', role.event || { id: role.eventId, name: role.name })}
-        onAiChat={(role: any) => openAiDiscuss({ ...role, id: `smm-role:${role.id}`, title: role.name, smmKind: 'role' })}
-        onToggleBookmark={(id: string) => void toggleSmmBookmark('role', id)}
-        onOpenProfileUser={(u: any) => openUserLibrary(u)}
-        onOpenProfilePage={() => setPage('profile')}
-        onCycleLang={cycleLang}
-        gotoEvents={() => setPage('smm-events')}
-        gotoMail={() => setPage('smm-mail')}
-      />
-    );
-  }
-
-  // SMM LIBRARY — the specialist's «Личная библиотека» (my bookmarked
-  // events, each card ready to «Отправить запрос») + «Публичная библиотека»
-  // (the whole open library). The events-page twin with the specialist dock.
-  if (effectivePage === 'smm-library') {
-    return (
-      <SmmLibraryView
-        user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '' } : null}
-        myAvatar={myAvatar}
-        events={libraryItems}
-        loading={libraryLoading}
-        scope={libraryScope}
-        pinnedEventIds={smmBmEvents}
-        focusEventId={focusEventId}
-        goHome={() => setPage('dashboard')}
-        onCreateRequest={startCreateRequest}
-        onEditRequests={() => { useSmmStore.getState().setRequestsEditMode(true); setPage('smm-requests'); }}
-        onSendRequest={(ev: any) => openSmmSendWizard(ev)}
-        onChat={(ev: any) => openSmmGroupChat('event', ev)}
-        onAiChat={(ev: any) => openAiDiscuss({ ...ev, id: `smm-e:${ev.id}`, title: ev.title, smmKind: 'event' })}
-        onToggleBookmark={(id: string) => void toggleSmmBookmark('event', id)}
-        onOpenProfileUser={(u: any) => openUserLibrary(u)}
-        onOpenOtherEvent={() => { /* the library cards never show the other-events row for specialists */ }}
-        onOpenProfilePage={() => setPage('profile')}
-        onCycleLang={cycleLang}
-        gotoLibrary={gotoSmmLibrary}
-        gotoInbox={() => setPage('smm-inbox')}
-        gotoRequests={() => setPage('smm-requests')}
-      />
-    );
-  }
-
-  // SMM MAIL — «Почта», the customer's requests hub: the received
-  // applications (accept/decline) + the sent invitations (edit/withdraw),
-  // with the page's own sub-panel «Принятые запросы | Отправленные запросы»
-  // above the main dock (the brief's double-bottom pattern).
-  if (effectivePage === 'smm-mail') {
-    return (
-      <SmmMailView
-        user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '', image: (effectiveUser as any).image || null } : null}
-        myAvatar={myAvatar}
-        mySmmRole={mySmmRole}
-        goHome={() => setPage('dashboard')}
-        onOpenProfilePage={() => setPage('profile')}
-        onCycleLang={cycleLang}
-        onSwitchRole={switchSmmRole}
-        gotoEvents={() => setPage('smm-events')}
-        gotoRoles={(rs: 'mine' | 'public') => { useSmmStore.getState().setRolesScopeRequest(rs); setPage('smm-roles'); }}
-        gotoLibrary={gotoSmmLibrary}
-        gotoInbox={() => setPage('smm-inbox')}
-        gotoRequests={() => setPage('smm-requests')}
-        onOpenEvent={(eventId: string) => {
-          changeEventsScope('mine');
-          setFocusEventId(eventId);
-          setPage('smm-events');
-        }}
       />
     );
   }

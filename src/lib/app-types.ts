@@ -7,10 +7,7 @@
 // 'guest-boot' — the anonymous share-link landing: the visitor opened
 // ?test=<id> without a session; the app boots that one test into the taking
 // screen while this splash is up. Guests can reach NOTHING else.
-// SMM pages: 'smm-mail' (Почта), 'smm-my-roles' (Личные роли), 'smm-shared-roles'
-// (Общие роли), 'smm-requests' family (the specialist's structured запросы),
-// 'smm-roles' (the roles pages host).
-export type Page = 'auth' | 'dashboard' | 'create-test' | 'edit-test' | 'create-event' | 'start-test' | 'take-test' | 'history' | 'profile' | 'guest-boot' | 'smm-events' | 'smm-inbox' | 'smm-wizard' | 'smm-requests' | 'smm-request-editor' | 'smm-request-fill' | 'smm-roles' | 'smm-mail' | 'smm-my-roles' | 'smm-shared-roles' | 'smm-library';
+export type Page = 'auth' | 'dashboard' | 'create-test' | 'edit-test' | 'start-test' | 'take-test' | 'history' | 'profile' | 'guest-boot';
 
 export interface Question {
   id?: string;
@@ -132,100 +129,6 @@ export interface GroupMessage {
   userImage?: string | null;
   text: string;
   createdAt: string;
-}
-
-// ─── SMM marketplace types ─────────────────────────────────────────────────
-
-export type SmmRole = 'customer' | 'specialist';
-
-export interface SmmSpecialist {
-  id: string;
-  name: string;
-  image?: string | null;
-  smmRole?: string;
-  headline?: string | null;
-  resume?: string | null;
-  videoUrl?: string | null;
-  city?: string | null;
-  rate?: string | null;
-  ready?: boolean;
-  filesCount?: number;
-  createdAt?: string;
-}
-
-export interface SmmRoleItem {
-  id: string;
-  name: string;
-  brief?: string | null;
-  payment?: string | null;
-  deadline?: string | null;
-  orderNum?: number;
-  assigned?: { userId: string; name: string; image: string | null; source: string }[];
-}
-
-export interface SmmEventItem {
-  id: string;
-  title: string;
-  summary?: string | null;
-  brief?: string | null;
-  deadline?: string | null;
-  budget?: string | null;
-  restrictions?: string | null;
-  kind?: string | null;
-  coverColor?: string | null;
-  coverIcon?: string | null;
-  status?: string | null;
-  createdAt?: string;
-  customerId?: string;
-  customer?: { id: string; name: string; image: string | null } | null;
-  // Other public open events of the SAME customer (the brief: the specialist
-  // sees who created the event and what else that customer runs)
-  customerOtherEvents?: { id: string; title: string; summary?: string | null; kind?: string | null; rolesCount: number }[];
-  roles?: SmmRoleItem[];
-  filesCount?: number;
-  applicationsCount?: number;
-  pendingApplications?: number;
-  invitationsCount?: number;
-  isOwner?: boolean;
-  files?: SmmFileItem[];
-}
-
-export interface SmmFileItem {
-  id: string;
-  title: string;
-  type?: string | null;
-  url: string;
-  size?: number | null;
-  tgMessageId?: number | null;
-  orderNum?: number;
-  createdAt?: string;
-}
-
-export interface SmmInvitationItem {
-  id: string;
-  eventId: string;
-  roleId: string;
-  status: string;
-  message?: string | null;
-  createdAt: string;
-  event?: { id: string; title: string; summary?: string | null; budget?: string | null; deadline?: string | null };
-  role?: { id: string; name: string; brief?: string | null; payment?: string | null; deadline?: string | null };
-  customer?: { id: string; name: string; image: string | null };
-  specialist?: { id: string; name: string; image: string | null };
-}
-
-export interface SmmApplicationItem {
-  id: string;
-  eventId: string;
-  roleId: string;
-  status: string;
-  message?: string | null;
-  createdAt: string;
-  event?: { id: string; title: string; summary?: string | null; budget?: string | null; deadline?: string | null };
-  role?: { id: string; name: string; brief?: string | null; payment?: string | null; deadline?: string | null };
-  specialist?: { id: string; name: string; image: string | null };
-  // The structured запрос the specialist attached to this application
-  request?: { id: string; title: string; summary?: string; steps?: { id: string; title: string; hint?: string; answer?: string }[] } | null;
 }
 
 export interface Attempt {

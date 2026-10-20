@@ -4,8 +4,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic';
 import { AttachmentItem, attachmentFileUrl, formatSize, typeIcon } from '@/components/attachment-utils';
 import LangButton from '@/components/lang-button';
-import { SmmSpecialistDock, SmmCustomerDock } from '@/components/pages/smm-roles-view-dock';
-import { useSmmStore } from '@/stores/smm-store';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,8 +15,7 @@ import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Question } from '@/lib/app-types';
 import { countAnsweredProgress, readTestProgress, type SavedTestProgress } from '@/lib/test-progress';
-import {
-  UserRoundCog, ArrowLeft, BookOpen, BookmarkX, Bot, Banknote, Bell, Briefcase, Building2, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, ClipboardList, Compass, Dices, Edit, ExternalLink, FlaskConical, Hash, Home, ImagePlus, Landmark, LayoutGrid, Library, Link2, ListChecks, Loader2, MapPin, Megaphone, MessageCircle, Palette, Paperclip, Pencil, Play, Plus, RefreshCw, Rows3, Search, ShieldAlert, Shuffle, Sparkles, Trash2, TreeDeciduous, UserPlus, Users, Video, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, BookmarkX, Bot, ChevronDown, ChevronRight, ChevronUp, ClipboardList, Compass, Dices, Edit, ExternalLink, FlaskConical, Hash, Home, ImagePlus, LayoutGrid, Library, Link2, ListChecks, Loader2, MessageCircle, Palette, Paperclip, Pencil, Play, Plus, RefreshCw, Rows3, Search, Shuffle, Sparkles, Trash2, TreeDeciduous, Users, X } from 'lucide-react';
 const AttachmentsEditor = dynamic(() => import('@/components/attachments').then(m => m.AttachmentsEditor), { ssr: false });
 const AttachmentsList = dynamic(() => import('@/components/attachments').then(m => m.AttachmentsList), { ssr: false });
 // Version tree — its own on-demand chunk (fetches the family + renders SVG)
@@ -27,8 +24,6 @@ const PhotoshopColorPicker = dynamic(() => import('@/components/color-picker').t
 
 import type { Page, Test, TreeNode } from '@/lib/app-types';
 import { CreatorStrip, TranslatingPill, topicBgClass, tagHash, coverBgFor, imgSrc, GLASS_TILE } from '@/components/shared-bits';
-import SmmEventSlide from '@/components/pages/smm-event-slide';
-import { smmCoverColor } from '@/lib/smm-client';
 import { testBackgroundCss } from '@/lib/test-bg';
 import { useExitMount } from '@/components/motion';
 
@@ -139,22 +134,6 @@ export interface DashboardViewProps {
   openFilesCard: (...args: any[]) => any;
   cycleDashView: (...args: any[]) => any;
   toggleDiscoverMode: (...args: any[]) => any;
-  // ─── SMM marketplace ──────────────────────────────────────────────────
-  smmFeed: { kind: 'specialists' | 'events'; items: any[] };
-  smmLoading: boolean;
-  smmBmSpecialists: string[];
-  smmBmEvents: string[];
-  mySmmRole: 'customer' | 'specialist';
-  openSmmWizard: (mode: 'invite' | 'apply' | 'send', target: any) => void;
-  toggleSmmBookmark: (kind: 'specialist' | 'event', id: string) => void;
-  gotoSmmPage: (p: 'smm-events' | 'smm-inbox' | 'smm-requests' | 'smm-roles' | 'smm-mail' | 'smm-library') => void;
-  // The specialist's «+» opens the ЗАПРОС editor; «изменить» routes to the
-  // «Отправленные запросы» page with its edit mode on; the account switcher
-  // cycles заказчик ↔ SMM-специалист (the language-button look).
-  onCreateRequest: () => void;
-  gotoRequestsWithEdit: () => void;
-  onSwitchSmmRole: () => void;
-  switchingRole: boolean;
 }
 
 export default function DashboardView({
@@ -192,18 +171,6 @@ export default function DashboardView({
   openFilesCard,
   cycleDashView,
   toggleDiscoverMode,
-  smmFeed,
-  smmLoading,
-  smmBmSpecialists,
-  smmBmEvents,
-  mySmmRole,
-  openSmmWizard,
-  toggleSmmBookmark,
-  gotoSmmPage,
-  onCreateRequest,
-  gotoRequestsWithEdit,
-  onSwitchSmmRole,
-  switchingRole,
 }: DashboardViewProps) {
   // ── State: read straight from the zustand domain stores ─────────────────
   // app-root keeps the ACTION handlers (they orchestrate the query cache);
@@ -342,15 +309,6 @@ export default function DashboardView({
   // dashboard store
   const dashFullTests = useDashboardStore(s => s.dashFullTests);
   const dashTestIdx = useDashboardStore(s => s.dashTestIdx);
-  // ─── SMM feed mode ─────────────────────────────────────────────────────
-  // The dashboard feed swaps to the SMM content kind: a customer browses
-  // SPECIALISTS, a specialist browses EVENTS (the brief's «лента анкет»).
-  // Grid views (library/shelf) and the files/tree flows keep the tests.
-  // smmActive = the SMM marketplace feed replaces the tests TikTok feed for
-  // an SMM account. Deliberately TIKTOK-ONLY: the library/shelf grid views
-  // keep the full TESTS ladder (the frozen brief — the tests site stays
-  // intact); the events page carries its own view kinds over EVENT cards.
-  const smmActive = !!effectiveUser && !viewingUser && !filesFeedMode && !treeFeedMode && (dashView === 'tiktok1' || dashView === 'tiktok2');
   // Saved progress ("Continue Test") for the card on screen — loaded from the
   // DATABASE (SavedProgress table) whenever the visible card changes. The
   // clear-on-switch keeps a stale "Continue N answers" button from ever
@@ -373,24 +331,6 @@ export default function DashboardView({
   const libWide = useDashboardStore(s => s.libWide);
   const libUltra = useDashboardStore(s => s.libUltra);
   const dashSearch = useDashboardStore(s => s.dashSearch);
-  // SMM search — the top-panel search filters the SMM feed LOCALLY (name /
-  // headline / summary / roles / city) while the feed is active; over the
-  // tests grids the server tag search applies as before.
-  const smmQuery = dashSearch.trim().toLowerCase();
-  const visibleSmmItems = React.useMemo(() => {
-    if (!smmActive || !smmQuery) return smmFeed.items;
-    return (smmFeed.items as any[]).filter(it => {
-      const hay = smmFeed.kind === 'events'
-        ? [it.title, it.summary, it.brief, it.customer?.name, ...(it.roles || []).map((r: any) => r.name)]
-        : [it.name, it.headline, it.resume, it.city, it.rate];
-      return hay.filter(Boolean).join(' ').toLowerCase().includes(smmQuery);
-    });
-  }, [smmActive, smmQuery, smmFeed]);
-  const smmLen = smmActive ? visibleSmmItems.length : 0;
-  const curSmmItem: any = smmActive ? visibleSmmItems[Math.min(Math.max(0, dashTestIdx), Math.max(0, smmLen - 1))] : null;
-  // The ACTIVE list length drives the skeleton/empty branches: in SMM mode
-  // the tests list may be empty while the specialist/event feed has cards.
-  const activeLen = smmActive ? smmLen : tests.length;
   const setDashSearch = useDashboardStore(s => s.setDashSearch);
   const dashSearchOpen = useDashboardStore(s => s.dashSearchOpen);
   const setDashSearchOpen = useDashboardStore(s => s.setDashSearchOpen);
@@ -1039,43 +979,16 @@ export default function DashboardView({
                     : (viewingUser.name || '?').trim().slice(0, 1).toUpperCase() || '?'}
                 </span>
               )}
-              {/* «+» — the create action follows the account kind: the
-              customer's opens the EVENT editor (the test editor's twin),
-              the SPECIALIST's opens the ЗАПРОС editor (the same twin — a
-              запрос is the specialist's document). Over the tests grids it
-              keeps creating TESTS. */}
-              {(!smmActive || mySmmRole === 'customer') && (
-                <Button onClick={startCreateTest} className="rounded-full bg-primary hover:bg-primary/90 shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm">
-                  <Plus className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{smmActive && mySmmRole === 'customer' ? t('smmCreateEvent') : t('createTest')}</span>
-                </Button>
-              )}
-              {smmActive && mySmmRole === 'specialist' && (
-                <Button onClick={onCreateRequest} className="rounded-full bg-primary hover:bg-primary/90 shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm" title={t('smmNewRequest')}>
-                  <Plus className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('smmNewRequest')}</span>
-                </Button>
-              )}
-              {/* «Изменить»: the tests edit-mode over the tests feed; the
-              SPECIALIST's routes to «Отправленные запросы» with its edit
-              mode on (изменять можно свои запросы). */}
-              {!smmActive && (
-                <Button
-                  variant="outline"
-                  onClick={() => setEditMode(v => !v)}
-                  className={`rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm ${editMode ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
-                >
-                  <Edit className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('editTest')}</span>
-                </Button>
-              )}
-              {smmActive && mySmmRole === 'specialist' && (
-                <Button
-                  variant="outline"
-                  onClick={gotoRequestsWithEdit}
-                  className="rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm border-black"
-                  title={t('smmEditRequestTitle')}
-                >
-                  <Edit className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('gEdit')}</span>
-                </Button>
-              )}
+              <Button onClick={startCreateTest} className="rounded-full bg-primary hover:bg-primary/90 shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm">
+                <Plus className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('createTest')}</span>
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setEditMode(v => !v)}
+                className={`rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm ${editMode ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
+              >
+                <Edit className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('editTest')}</span>
+              </Button>
             </div>
             <div className="flex items-center gap-1 sm:gap-2 shrink-0 ml-auto">
               <Button
@@ -1110,22 +1023,6 @@ export default function DashboardView({
                 </span>
               </Button>
               <LangButton lang={lang} onChange={cycleLang} className="border-black px-2 sm:px-3" />
-              {/* The ACCOUNT SWITCHER — the language-button twin: one tap
-              cycles заказчик ↔ SMM-специалист (persisted in the DB), the
-              whole feed re-resolves to the other account kind. */}
-              {smmActive && (
-                <Button
-                  variant="outline"
-                  onClick={onSwitchSmmRole}
-                  disabled={switchingRole}
-                  title={t('smmSwitchAccount')}
-                  aria-label={t('smmSwitchAccount')}
-                  className="rounded-full shrink-0 border-black h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3 lg:h-10 lg:text-sm font-semibold gap-1.5"
-                >
-                  <UserRoundCog className="w-4 h-4" />
-                  <span className="hidden sm:inline">{mySmmRole === 'customer' ? t('smmRoleCustomer') : t('smmRoleSpecialist')}</span>
-                </Button>
-              )}
               <div className="hidden md:block text-right min-w-0">
                 <p className="text-sm font-medium truncate max-w-[180px]">{effectiveUser?.name}</p>
                 <p className="text-xs text-muted-foreground truncate max-w-[180px]">{effectiveUser?.email}</p>
@@ -1152,30 +1049,13 @@ export default function DashboardView({
           </div>
         </header>
 
-        {/* ── SCOPE SEGMENT — «Личное» | «Общее»: the dashboard's own content
-        switch (the SMM feed scope + the tests library scope together, like
-        the old tests site's very-bottom pair). It lives INSIDE the page now —
-        the bottom dock carries only the four PAGE tabs. ── */}
-        {effectiveUser && !viewingUser && !filesFeedMode && !treeFeedMode && !gridFilesMode && !gridTreeMode && (
-          <div className="shrink-0 z-30 bg-background/95 backdrop-blur-md border-b border-black/5">
-            <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 flex gap-2">
-              <button type="button" onClick={() => gotoLibraryMode(false)} className={`min-w-0 flex items-center justify-center gap-1.5 h-8 px-3 rounded-full border-2 text-xs sm:text-[13px] font-semibold transition-colors ${!discoverMode ? 'bg-primary text-white border-primary shadow-md' : 'border-black/15 bg-white hover:bg-muted/50'}`}>
-                <Library className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{t('modeMine')}</span>
-              </button>
-              <button type="button" onClick={() => gotoLibraryMode(true)} className={`min-w-0 flex items-center justify-center gap-1.5 h-8 px-3 rounded-full border-2 text-xs sm:text-[13px] font-semibold transition-colors ${discoverMode ? 'bg-primary text-white border-primary shadow-md' : 'border-black/15 bg-white hover:bg-muted/50'}`}>
-                <Compass className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{t('modeDiscover')}</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeLen === 0 && viewingLoading ? (
+        {tests.length === 0 && viewingLoading ? (
           <main className="flex-1 min-h-0 flex items-center justify-center">
             <p className="text-sm text-muted-foreground flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" /> {t('loading')}
             </p>
           </main>
-        ) : activeLen === 0 && (loading || feedLoading || smmLoading || !dataReady) ? (
+        ) : tests.length === 0 && (loading || feedLoading || !dataReady) ? (
           /* FIRST-DATA SKELETON — a stable placeholder shaped like a feed card.
              The server HTML already shows it, so a returning user never sees
              an empty screen, a splash or a "no tests" flash: cached (or fresh)
@@ -1194,19 +1074,7 @@ export default function DashboardView({
               <Skeleton className="h-9 w-1/2 mx-auto rounded-full" />
             </div>
           </main>
-        ) : activeLen === 0 ? (
-          smmActive ? (
-            /* SMM empty state — the feed kind speaks for itself (no tests
-            CTA here: the events/invitations pages carry the creation flows) */
-            <main className="flex-1 min-h-0 flex items-center justify-center px-4">
-              <Card className="rounded-4xl border-dashed border-black/30 bg-white w-full max-w-md">
-                <CardContent className="py-12 text-center">
-                  {mySmmRole === 'customer' ? <Megaphone className="w-12 h-12 mx-auto text-muted-foreground mb-4" /> : <Briefcase className="w-12 h-12 mx-auto text-muted-foreground mb-4" />}
-                  <p className="text-muted-foreground">{mySmmRole === 'customer' ? t('smmEmptySpecialists') : t('smmEmptyEvents')}</p>
-                </CardContent>
-              </Card>
-            </main>
-          ) : (
+        ) : tests.length === 0 ? (
           <main className="flex-1 min-h-0 overflow-y-auto">
             <div className="max-w-7xl mx-auto px-4 py-6">
               <Card className="rounded-4xl border-dashed border-black/30 bg-white">
@@ -1232,7 +1100,6 @@ export default function DashboardView({
               </Card>
             </div>
           </main>
-          )
         ) : (
           <>
             {/* LIBRARY / SHELF views — endless shelves, 3 per screen, scrolling down.
@@ -1530,7 +1397,7 @@ export default function DashboardView({
                 key="feed-tiktok-swiper"
                 {...swiperParams}
                 className="feed-swiper h-full screen-enter"
-                initialSlide={Math.min(Math.max(0, dashTestIdx), Math.max(0, (smmActive ? smmLen : tests.length) - 1))}
+                initialSlide={Math.min(Math.max(0, dashTestIdx), Math.max(0, tests.length - 1))}
                 onSwiper={(sw) => { testsSwiperRef.current = sw; applyPendingSlide(sw); }}
                 onSlideChange={(sw) => onDashCommitRef.current(sw.activeIndex, 'tests')}
               >
@@ -1538,118 +1405,11 @@ export default function DashboardView({
                   onPrev={() => testsSwiperRef.current?.slidePrev()}
                   onNext={() => testsSwiperRef.current?.slideNext()}
                   canPrev={dashTestIdx > 0}
-                  canNext={dashTestIdx < (smmActive ? smmLen : tests.length) - 1}
+                  canNext={dashTestIdx < tests.length - 1}
                   prevLabel={t('feedPrev')}
                   nextLabel={t('feedNext')}
                 />
-              {smmActive ? (
-                smmLen === 0 ? (
-                  <SwiperSlide key="smm-empty" className="relative !h-full overflow-hidden bg-background">
-                    <div className="h-full w-full flex flex-col items-center justify-center px-6 text-center gap-2">
-                      {smmLoading ? (
-                        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                      ) : (
-                        <>
-                          {mySmmRole === 'customer' ? <Megaphone className="w-8 h-8 text-muted-foreground" /> : <Briefcase className="w-8 h-8 text-muted-foreground" />}
-                          <p className="text-sm text-muted-foreground">{mySmmRole === 'customer' ? t('smmEmptySpecialists') : t('smmEmptyEvents')}</p>
-                        </>
-                      )}
-                    </div>
-                  </SwiperSlide>
-                ) : visibleSmmItems.map((item: any, idx: number) => {
-                  const isCurSmm = idx === Math.min(dashTestIdx, smmLen - 1);
-                  if (smmFeed.kind === 'events') {
-                    // The shared EVENT slide — the IDENTICAL card the
-                    // customer's «Мероприятия» page draws (one component, so
-                    // the two sides can never drift apart visually).
-                    const ev = item;
-                    return (
-                      <SmmEventSlide
-                        key={ev.id}
-                        ev={ev}
-                        pinned={smmBmEvents.includes(ev.id)}
-                        isOwner={false}
-                        editMode={editMode}
-                        onToggleBookmark={() => toggleSmmBookmark('event', ev.id)}
-                        onOpenProfile={ev.customer ? () => openUserLibrary({ id: ev.customer.id, name: ev.customer.name, image: ev.customer.image }) : undefined}
-                        onChat={() => openCardGroupChat({ ...ev, id: `smm-e:${ev.id}`, title: ev.title, smmKind: 'event' })}
-                        onAiDiscuss={() => openAiDiscuss({ ...ev, id: `smm-e:${ev.id}`, title: ev.title, smmKind: 'event' })}
-                        onSend={() => openSmmWizard('send', ev)}
-                        onFiles={(ev.filesCount || 0) > 0 ? () => openCardFiles({ ...ev, id: `smm-e:${ev.id}`, title: ev.title, smmKind: 'event' }) : undefined}
-                      />
-                    );
-                  }
-                  const sp = item;
-                  const spPinned = smmBmSpecialists.includes(sp.id);
-                  return (
-                    <SwiperSlide key={sp.id} className="relative !h-full overflow-hidden" style={sp.videoUrl ? undefined : { backgroundColor: smmCoverColor(sp.id) }}>
-                      {sp.videoUrl && (
-                        <>
-                          <video src={imgSrc(sp.videoUrl)} autoPlay muted loop playsInline className="absolute inset-0 w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/30" />
-                        </>
-                      )}
-                      <div className="relative h-full w-full flex flex-col items-center justify-center px-3 py-3 sm:px-4 sm:py-4 lg:py-6 lg:pb-40 min-h-0">
-                        <div className="w-full max-w-md lg:max-w-3xl flex flex-col gap-2.5 sm:gap-4 [@media(max-height:700px)]:gap-1.5 min-h-0">
-                          <CreatorStrip
-                            name={sp.name}
-                            creatorId={sp.id}
-                            image={sp.image || null}
-                            bookmarked={spPinned}
-                            onToggleBookmark={() => toggleSmmBookmark('specialist', sp.id)}
-                            addLabel={t('bookmarkAdd')}
-                            removeLabel={t('bookmarkRemove')}
-                            addShort={t('bookmarkAddShort')}
-                            removeShort={t('bookmarkRemoveShort')}
-                            onOpenProfile={() => openUserLibrary({ id: sp.id, name: sp.name, image: sp.image })}
-                            openLabel={t('openProfile')}
-                            title={sp.name}
-                          />
-                          <div className="rounded-3xl border-2 border-black/10 bg-white/85 backdrop-blur px-4 py-3 space-y-2">
-                            {sp.headline && <p className="font-bold text-base leading-tight">{sp.headline}</p>}
-                            {sp.resume && <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-4">{sp.resume}</p>}
-                            <div className="flex flex-wrap gap-1.5 text-[11px]">
-                              {sp.city && <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5"><MapPin className="w-3 h-3" />{sp.city}</span>}
-                              {sp.rate && <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5"><Banknote className="w-3 h-3" />{sp.rate}</span>}
-                              {sp.ready !== false && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 font-semibold"><CheckCircle2 className="w-3 h-3" />{t('smmReadyToWork')}</span>}
-                            </div>
-                          </div>
-                          {!editMode && (
-                            <>
-                              <button type="button" onClick={() => openAiDiscuss({ ...sp, id: `smm-u:${sp.id}`, title: sp.name, smmKind: 'specialist' })} className={`shrink-0 w-full flex items-center gap-1.5 rounded-2xl border-2 px-3 py-1.5 [@media(max-height:700px)]:py-1 text-left transition-colors ${aiCardTestId === `smm-u:${sp.id}` ? 'border-primary bg-[#FFE8DE]' : 'border-black bg-white hover:bg-muted/50'}`}>
-                                <Bot className="w-4 h-4 shrink-0" />
-                                <span className="font-semibold text-sm">{t('aiDiscuss')}</span>
-                                <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
-                              </button>
-                              <button type="button" onClick={() => openCardGroupChat({ ...sp, id: `smm-u:${sp.id}`, title: sp.name, smmKind: 'specialist' })} className="shrink-0 w-full flex items-center gap-1.5 rounded-2xl border-2 border-black bg-white px-3 py-1.5 [@media(max-height:700px)]:py-1 text-left hover:bg-muted/50 transition-colors">
-                                <MessageCircle className="w-4 h-4 shrink-0" />
-                                <span className="font-semibold text-sm">{t('chat')}</span>
-                                <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
-                              </button>
-                              {(sp.filesCount || 0) > 0 && (
-                                <button type="button" onClick={() => openCardFiles({ ...sp, id: `smm-u:${sp.id}`, title: sp.name, smmKind: 'specialist' })} className="shrink-0 w-full flex items-center gap-1.5 rounded-2xl border-2 border-black bg-white px-3 py-1.5 [@media(max-height:700px)]:py-1 text-left hover:bg-muted/50 transition-colors">
-                                  <Paperclip className="w-4 h-4 shrink-0" />
-                                  <span className="font-semibold text-sm">{t('attachedFiles', { n: sp.filesCount })}</span>
-                                  <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
-                                </button>
-                              )}
-                              {!discoverMode && !viewingUser && spPinned && (
-                                <button type="button" onClick={() => toggleSmmBookmark('specialist', sp.id)} className="shrink-0 w-full flex items-center gap-1.5 rounded-2xl border-2 border-black bg-white px-3 py-1.5 [@media(max-height:700px)]:py-1 text-left hover:bg-muted/50 transition-colors">
-                                  <BookmarkX className="w-4 h-4 shrink-0" />
-                                  <span className="font-semibold text-sm">{t('unpinBtn')}</span>
-                                </button>
-                              )}
-                            </>
-                          )}
-                          {isCurSmm && editMode && (
-                            <p className="text-xs text-muted-foreground text-center">{t('editModeOn')}</p>
-                          )}
-                        </div>
-                      </div>
-                    </SwiperSlide>
-                  );
-                })
-              ) : tests.map((test, idx) => {
+              {tests.map((test, idx) => {
                 const isCur = idx === Math.min(dashTestIdx, tests.length - 1);
                 const totalQ = test._count?.questions || test.questions?.length || 0;
                 // Per-card stable start values: each card shows ITS OWN defaults;
@@ -2002,20 +1762,7 @@ export default function DashboardView({
               <div
                 className="max-w-2xl mx-auto px-4 pt-3 pb-3"
               >
-                {smmActive ? (
-                  /* SMM feed: the main action per the brief — «Пригласить»
-                  (customer → specialist) / «Подать заявку» (specialist →
-                  event); the wizard opens in the question-cards window */
-                  <Button
-                    onClick={() => curSmmItem && openSmmWizard(mySmmRole === 'customer' ? 'invite' : 'apply', curSmmItem)}
-                    disabled={loading || !curSmmItem}
-                    className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-primary hover:bg-primary/90"
-                  >
-                    {mySmmRole === 'customer'
-                      ? <><UserPlus className="w-4 h-4 mr-2 shrink-0" /> {t('smmInviteBtn')}</>
-                      : <><Megaphone className="w-4 h-4 mr-2 shrink-0" /> {t('smmApplyBtn')}</>}
-                  </Button>
-                ) : editMode ? (
+                {editMode ? (
                   <Button
                     onClick={() => curDashTest && startEditTest(curDashTest)}
                     className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-cta hover:bg-cta/90 text-white"
@@ -2044,38 +1791,44 @@ export default function DashboardView({
           </>
         )}
 
-        {/* LIBRARY PAGES DOCK — the very-bottom panel with the PAGE buttons.
+        {/* LIBRARY PAGES DOCK — the very-bottom panel with the two PAGE
+        buttons standing side by side: Personal library | Public library.
         It lives BELOW the Start-test bottom bar (which floats above it on
         desktop via .desktop-dock-raised) and is rendered in EVERY dashboard
-        state — including the empty/skeleton screens. The role decides the
-        four buttons: the SPECIALIST gets Личная библиотека | Публичная
-        библиотека | Принятые запросы | Отправленные запросы; the CUSTOMER
-        gets Личные роли | Общие роли | Личное | Общее (the «мероприятия»
-        button is replaced by the roles pages per the brief). A signed-out
-        visitor keeps the classic Личное | Общее pair. The active page is
-        highlighted (cta fill). */}
+        state — including the empty/skeleton screens, so a brand-new user can
+        still reach Discover. The active page is highlighted (cta fill), like
+        the old top-panel toggle was. This dock REPLACES that top-panel
+        toggle. The last panel carries the safe-area inset (mobile home
+        bars); the Start bar above it uses a fixed padding now. */}
         <div className="desktop-dock shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
           <div
             className="max-w-2xl mx-auto px-3 sm:px-4 pt-2"
             style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
           >
-            {effectiveUser && mySmmRole === 'specialist' ? (
-              <SmmSpecialistDock
-                lang={lang}
-                active={null}
-                gotoLibrary={(scope: 'mine' | 'discover') => { useSmmStore.getState().setLibraryScope(scope); gotoSmmPage('smm-library'); }}
-                gotoInbox={() => gotoSmmPage('smm-inbox')}
-                gotoRequests={() => gotoSmmPage('smm-requests')}
-              />
-            ) : (
-              <SmmCustomerDock
-                lang={lang}
-                active={null}
-                gotoEvents={() => gotoSmmPage('smm-events')}
-                gotoRoles={(scope) => { useSmmStore.getState().setRolesScopeRequest(scope); gotoSmmPage('smm-roles'); }}
-                gotoMail={() => gotoSmmPage('smm-mail')}
-              />
-            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => gotoLibraryMode(false)}
+                disabled={loading}
+                title={`${t('modeMine')} · ${t('modeMineHint')}`}
+                aria-label={t('modeMine')}
+                className={`min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${(!discoverMode && !viewingUser) ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`}
+              >
+                <Library className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
+                <span className="min-w-0 truncate">{t('modeMine')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => gotoLibraryMode(true)}
+                disabled={loading}
+                title={`${t('modeDiscover')} · ${t('modeDiscoverHint')}`}
+                aria-label={t('modeDiscover')}
+                className={`min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${discoverMode ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`}
+              >
+                <Compass className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
+                <span className="min-w-0 truncate">{t('modeDiscover')}</span>
+              </button>
+            </div>
           </div>
         </div>
 

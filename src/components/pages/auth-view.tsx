@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Briefcase, FlaskConical, Megaphone } from 'lucide-react';
+import { FlaskConical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,8 +34,6 @@ export default function AuthView({ handleAuth, onCancel }: AuthViewProps) {
   const setName = useSessionStore(s => s.setName);
   const setEmail = useSessionStore(s => s.setEmail);
   const setPassword = useSessionStore(s => s.setPassword);
-  const smmRole = useSessionStore(s => s.smmRole);
-  const setSmmRole = useSessionStore(s => s.setSmmRole);
   const loading = useSessionStore(s => s.loading);
   const lang = useSessionStore(s => s.lang);
   const t = React.useCallback((key: string, vars?: Record<string, string | number>) => tUI(lang, key, vars), [lang]);
@@ -58,43 +56,6 @@ export default function AuthView({ handleAuth, onCancel }: AuthViewProps) {
             <div className="space-y-2">
               <Label htmlFor="name">{t('fullName')}</Label>
               <Input id="name" placeholder="John Doe" value={name} onChange={e => setName(e.target.value)} />
-            </div>
-          )}
-          {authMode === 'signup' && (
-            <div className="space-y-2">
-              <Label>{t('smmWhoAreYou')}</Label>
-              {/* FIXED 2-SLOT GRID — the same contract as the mode buttons on
-              the start screen: both slots always exist, labels hide together */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSmmRole('customer')}
-                  className={`p-2.5 sm:p-3 rounded-xl border-2 transition-all text-left ${
-                    smmRole === 'customer'
-                      ? 'border-cta bg-[#FFF0D9] shadow-md'
-                      : 'border-transparent bg-muted/50 hover:bg-muted'
-                  }`}
-                >
-                  <div className="min-w-0 flex items-center gap-2 [@media(max-width:479px)]:justify-center">
-                    <Briefcase className="w-4 h-4 text-cta shrink-0" />
-                    <span className="font-semibold text-sm min-w-0 [@media(max-width:479px)]:hidden">{t('smmRoleCustomer')}</span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSmmRole('specialist')}
-                  className={`p-2.5 sm:p-3 rounded-xl border-2 transition-all text-left ${
-                    smmRole === 'specialist'
-                      ? 'border-primary bg-[#FFE8DE] shadow-md'
-                      : 'border-transparent bg-muted/50 hover:bg-muted'
-                  }`}
-                >
-                  <div className="min-w-0 flex items-center gap-2 [@media(max-width:479px)]:justify-center">
-                    <Megaphone className="w-4 h-4 text-primary shrink-0" />
-                    <span className="font-semibold text-sm min-w-0 [@media(max-width:479px)]:hidden">{t('smmRoleSpecialist')}</span>
-                  </div>
-                </button>
-              </div>
             </div>
           )}
           <div className="space-y-2">
