@@ -7,7 +7,7 @@
 // 'guest-boot' — the anonymous share-link landing: the visitor opened
 // ?test=<id> without a session; the app boots that one test into the taking
 // screen while this splash is up. Guests can reach NOTHING else.
-export type Page = 'auth' | 'dashboard' | 'create-test' | 'edit-test' | 'create-event' | 'start-test' | 'take-test' | 'history' | 'profile' | 'guest-boot' | 'smm-events' | 'smm-inbox' | 'smm-wizard';
+export type Page = 'auth' | 'dashboard' | 'create-test' | 'edit-test' | 'create-event' | 'start-test' | 'take-test' | 'history' | 'profile' | 'guest-boot' | 'smm-events' | 'smm-inbox' | 'smm-wizard' | 'smm-requests' | 'smm-request-editor' | 'smm-request-fill' | 'smm-roles';
 
 export interface Question {
   id?: string;
@@ -221,6 +221,8 @@ export interface SmmApplicationItem {
   event?: { id: string; title: string; summary?: string | null; budget?: string | null; deadline?: string | null };
   role?: { id: string; name: string; brief?: string | null; payment?: string | null; deadline?: string | null };
   specialist?: { id: string; name: string; image: string | null };
+  // The structured запрос the specialist attached to this application
+  request?: { id: string; title: string; summary?: string; steps?: { id: string; title: string; hint?: string; answer?: string }[] } | null;
 }
 
 export interface Attempt {

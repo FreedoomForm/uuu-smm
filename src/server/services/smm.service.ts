@@ -330,9 +330,13 @@ export async function addRole(eventId: string, userId: string, body: { name: str
 }
 
 async function assertRoleOwner(roleId: string, userId: string) {
-  const role = await db.smmRole.findUnique({ where: { id: roleId }, select: { event: { select: { customerId: true } } } });
+  const role = await db.smmRole.findUnique({ where: { id: roleId }, select: { event: { select: { customerId: true } }, authorId: true } });
   if (!role) throw ApiError.notFound("Role not found");
-  if (role.event.customerId !== userId) throw ApiError.forbidden("Not your event");
+  // Both the event's owner (an event role) and the template's author
+  // (a public «Общие роли» template) may manage the role.
+  const isEventOwner = !!role.event && role.event.customerId === userId;
+  const isAuthor = role.authorId === userId;
+  if (!isEventOwner && !isAuthor) throw ApiError.forbidden("Not your role");
 }
 
 export async function updateRole(roleId: string, userId: string, body: any) {
@@ -344,6 +348,67 @@ export async function deleteRole(roleId: string, userId: string) {
   await assertRoleOwner(roleId, userId);
   await db.smmRole.delete({ where: { id: roleId } });
   return { ok: true };
+}
+
+// ── ОБЩИЕ РОЛИ — public task templates. box=mine → my event roles + my
+// templates; box=public → every isPublic template (the sharing library).
+export async function listRoles(userId: string, box: "mine" | "public") {
+  if (box === "public") {
+    const roles = await db.smmRole.findMany({
+      where: { isPublic: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: {
+        author: { select: { id: true, name: true, image: true } },
+        event: { select: { id: true, title: true, kind: true } },
+      },
+    });
+    return roles;
+  }
+  // mine: every role of MY events + my standalone templates
+  const roles = await db.smmRole.findMany({
+    where: { OR: [{ event: { customerId: userId } }, { authorId: userId }] },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: {
+      author: { select: { id: true, name: true, image: true } },
+      event: { select: { id: true, title: true, kind: true } },
+      _count: { select: { applications: { where: { status: "pending" } }, invitations: { where: { status: "pending" } } } },
+    },
+  });
+  return roles.map((r: any) => ({
+    ...r,
+    pendingApplications: r._count?.applications || 0,
+    pendingInvitations: r._count?.invitations || 0,
+    _count: undefined,
+  }));
+}
+
+/** Publish / unpublish MY role as a public template, or create a standalone
+ * public template («Общие роли» — people share task templates for roles). */
+export async function createRoleTemplate(userId: string, body: { name: string; brief?: string; payment?: string; deadline?: string; isPublic?: boolean }) {
+  if (!body.name?.trim()) throw ApiError.badRequest("Name is required");
+  return db.smmRole.create({
+    data: {
+      name: body.name, brief: body.brief || "", payment: body.payment || "",
+      deadline: body.deadline || "", isPublic: body.isPublic !== false,
+      authorId: userId, orderNum: 0,
+    },
+    include: { author: { select: { id: true, name: true, image: true } } },
+  });
+}
+
+/** Attach a public template into one of MY events — copies the template text
+ * into a fresh role of the event (the template itself stays shared). */
+export async function attachRoleTemplate(roleId: string, userId: string, body: { eventId: string }) {
+  await assertEventOwner(body.eventId, userId);
+  const tpl = await db.smmRole.findUnique({ where: { id: roleId }, select: { name: true, brief: true, payment: true, deadline: true, isPublic: true, authorId: true, event: { select: { customerId: true } } } });
+  if (!tpl) throw ApiError.notFound("Role not found");
+  if (!tpl.isPublic && tpl.authorId !== userId && tpl.event?.customerId !== userId) throw ApiError.forbidden("Not a public template");
+  const count = await db.smmRole.count({ where: { eventId: body.eventId } });
+  return db.smmRole.create({
+    data: { name: tpl.name, brief: tpl.brief, payment: tpl.payment, deadline: tpl.deadline, eventId: body.eventId, orderNum: count },
+  });
 }
 
 // ------------------------------------------------------------ invitations --
@@ -401,27 +466,34 @@ export async function respondInvitation(id: string, userId: string, action: "acc
 
 // ----------------------------------------------------------- applications --
 
-export async function createApplication(userId: string, body: { eventId: string; roleId: string; message?: string }) {
+export async function createApplication(userId: string, body: { eventId: string; roleId: string; message?: string; requestId?: string }) {
   const ev = await db.smmEvent.findUnique({ where: { id: body.eventId }, select: { isPublic: true, status: true, customerId: true } });
   if (!ev) throw ApiError.notFound("Event not found");
   if (!ev.isPublic || ev.status !== "open") throw ApiError.badRequest("Event is not accepting applications");
   if (ev.customerId === userId) throw ApiError.badRequest("Cannot apply to your own event");
   const role = await db.smmRole.findUnique({ where: { id: body.roleId }, select: { eventId: true } });
   if (!role || role.eventId !== body.eventId) throw ApiError.badRequest("Role does not belong to the event");
+  // The structured запрос must belong to the sender
+  if (body.requestId) {
+    const req = await db.smmRequest.findUnique({ where: { id: body.requestId }, select: { specialistId: true } });
+    if (!req || req.specialistId !== userId) throw ApiError.forbidden("Not your запрос");
+  }
   const existing = await db.smmApplication.findFirst({
     where: { eventId: body.eventId, roleId: body.roleId, specialistId: userId, status: "pending" },
   });
   if (existing) {
-    return db.smmApplication.update({ where: { id: existing.id }, data: { message: body.message || "" } });
+    return db.smmApplication.update({ where: { id: existing.id }, data: { message: body.message || "", requestId: body.requestId || null } });
   }
   return db.smmApplication.create({
     data: {
       eventId: body.eventId, roleId: body.roleId, specialistId: userId, message: body.message || "",
+      requestId: body.requestId || null,
     },
     include: {
       event: { select: { id: true, title: true } },
       role: { select: { id: true, name: true } },
       specialist: { select: { id: true, name: true, image: true } },
+      request: { select: { id: true, title: true } },
     },
   });
 }
@@ -438,6 +510,7 @@ export async function listApplications(userId: string, box: "inbox" | "sent") {
       event: { select: { id: true, title: true, summary: true, budget: true, deadline: true } },
       role: { select: { id: true, name: true, brief: true, payment: true, deadline: true } },
       specialist: { select: { id: true, name: true, image: true } },
+      request: { select: { id: true, title: true, summary: true, steps: { orderBy: { orderNum: "asc" }, select: { id: true, title: true, hint: true, answer: true, orderNum: true } } } },
     },
   });
 }
@@ -455,7 +528,7 @@ export async function respondApplication(id: string, userId: string, action: "ac
 
 // -------------------------------------------------------------- bookmarks --
 
-export async function listSmmBookmarks(userId: string, targetType?: "specialist" | "event") {
+export async function listSmmBookmarks(userId: string, targetType?: "specialist" | "event" | "request" | "role") {
   const rows = await db.smmBookmark.findMany({
     where: { userId, ...(targetType ? { targetType } : {}) },
     select: { targetType: true, targetId: true },
@@ -463,14 +536,20 @@ export async function listSmmBookmarks(userId: string, targetType?: "specialist"
   return { ids: rows.map(r => r.targetId), pairs: rows };
 }
 
-export async function addSmmBookmark(userId: string, targetType: "specialist" | "event", targetId: string) {
+export async function addSmmBookmark(userId: string, targetType: "specialist" | "event" | "request" | "role", targetId: string) {
   // Validate the target exists
   if (targetType === "specialist") {
     const u = await db.user.findUnique({ where: { id: targetId }, select: { smmRole: true } });
     if (!u || u.smmRole !== "specialist") throw ApiError.notFound("Specialist not found");
-  } else {
+  } else if (targetType === "event") {
     const ev = await db.smmEvent.findUnique({ where: { id: targetId }, select: { id: true } });
     if (!ev) throw ApiError.notFound("Event not found");
+  } else if (targetType === "request") {
+    const r = await db.smmRequest.findUnique({ where: { id: targetId }, select: { id: true } });
+    if (!r) throw ApiError.notFound("Request not found");
+  } else {
+    const r = await db.smmRole.findUnique({ where: { id: targetId }, select: { id: true } });
+    if (!r) throw ApiError.notFound("Role not found");
   }
   await db.smmBookmark.upsert({
     where: { userId_targetType_targetId: { userId, targetType, targetId } },
@@ -480,7 +559,7 @@ export async function addSmmBookmark(userId: string, targetType: "specialist" | 
   return { ok: true };
 }
 
-export async function removeSmmBookmark(userId: string, targetType: "specialist" | "event", targetId: string) {
+export async function removeSmmBookmark(userId: string, targetType: "specialist" | "event" | "request" | "role", targetId: string) {
   await db.smmBookmark.deleteMany({ where: { userId, targetType, targetId } });
   return { ok: true };
 }
@@ -597,4 +676,278 @@ export async function chatAboutSpecialist(specialistId: string, messages: { role
     max_tokens: 1200,
   });
   return { response: text };
+}
+
+/** AI chat about an EVENT — the «ИИ чат» card button: the specialist (or the
+ * customer) discusses the event's brief, roles, payment and deadlines with
+ * the tutor. The same provider chain as the rest of the app. */
+export async function chatAboutEvent(eventId: string, messages: { role: "user" | "assistant"; content: string }[]) {
+  const ev = await db.smmEvent.findUnique({
+    where: { id: eventId },
+    select: {
+      title: true, summary: true, brief: true, deadline: true, budget: true,
+      restrictions: true, kind: true, status: true, isPublic: true,
+      customer: { select: { name: true } },
+      roles: { orderBy: { orderNum: "asc" }, select: { name: true, brief: true, payment: true, deadline: true } },
+    },
+  });
+  if (!ev) throw ApiError.notFound("Event not found");
+
+  const facts: string[] = [
+    `Мероприятие: ${ev.title}`,
+    ev.customer?.name ? `Заказчик: ${ev.customer.name}` : "",
+    `Тип: ${ev.kind === "government" ? "государство" : "бизнес"}`,
+    `Статус: ${ev.status === "open" ? "открыто" : "закрыто"}`,
+    ev.summary ? `Краткое описание: ${ev.summary}` : "",
+    ev.brief ? `Полное ТЗ:\n${ev.brief.slice(0, 4000)}` : "",
+    ev.deadline ? `Срок: ${ev.deadline}` : "",
+    ev.budget ? `Оплата: ${ev.budget}` : "",
+    ev.restrictions ? `Ограничения: ${ev.restrictions}` : "",
+    ev.roles.length
+      ? `Роли (${ev.roles.length}):\n${ev.roles.map(r => `- ${r.name}${r.payment ? ` · оплата: ${r.payment}` : ""}${r.deadline ? ` · срок: ${r.deadline}` : ""}${r.brief ? `\n  ТЗ: ${r.brief.slice(0, 800)}` : ""}`).join("\n")}`
+      : "Ролей пока нет.",
+  ].filter(Boolean);
+
+  const system = [
+    "Ты — помощник по SMM-мероприятиям. Пользователь изучает мероприятие и решает, откликнуться ли на него (или, если он заказчик, как его улучшить).",
+    "Отвечай на языке последнего сообщения пользователя. Будь конкретным и опирайся ТОЛЬКО на данные мероприятия ниже; если данных не хватает — честно скажи, что уточнить у заказчика.",
+    "",
+    "ДАННЫЕ МЕРОПРИЯТИЯ:",
+    ...facts,
+  ].join("\n");
+
+  const { text } = await aiChat({
+    messages: [{ role: "system", content: system }, ...messages],
+    temperature: 0.4,
+    max_tokens: 1200,
+  });
+  return { response: text };
+}
+
+/** AI chat about a ЗАПРОС — the «ИИ чат» card button on the request cards:
+ * the steps and their answers are the context. */
+export async function chatAboutRequest(requestId: string, messages: { role: "user" | "assistant"; content: string }[]) {
+  const rq = await db.smmRequest.findUnique({
+    where: { id: requestId },
+    select: {
+      title: true, summary: true, isPublic: true,
+      specialist: { select: { name: true, smmHeadline: true, smmCity: true, smmRate: true } },
+      steps: { orderBy: { orderNum: "asc" }, select: { title: true, hint: true, answer: true } },
+    },
+  });
+  if (!rq) throw ApiError.notFound("Request not found");
+
+  const facts: string[] = [
+    `Запрос: ${rq.title}`,
+    rq.specialist?.name ? `SMM-специалист: ${rq.specialist.name}` : "",
+    rq.specialist?.smmHeadline ? `Специализация: ${rq.specialist.smmHeadline}` : "",
+    rq.summary ? `Описание: ${rq.summary}` : "",
+    rq.steps.length
+      ? `Шаги (${rq.steps.length}):\n${rq.steps.map((s, i) => `${i + 1}. ${s.title}${s.hint ? ` — ${s.hint}` : ""}${s.answer ? `\n   Ответ: ${s.answer.slice(0, 600)}` : " (не заполнен)"}`).join("\n")}`
+      : "Шагов пока нет.",
+  ].filter(Boolean);
+
+  const system = [
+    "Ты — помощник по SMM-запросам. Запрос — это структурированное предложение специалиста: шаги описывают этапы работы.",
+    "Отвечай на языке последнего сообщения пользователя. Опирайся ТОЛЬКО на данные запроса ниже.",
+    "",
+    "ДАННЫЕ ЗАПРОСА:",
+    ...facts,
+  ].join("\n");
+
+  const { text } = await aiChat({
+    messages: [{ role: "system", content: system }, ...messages],
+    temperature: 0.4,
+    max_tokens: 1200,
+  });
+  return { response: text };
+}
+
+/** AI chat about a ROLE (ТЗ) — the «ИИ чат» card button on the roles pages:
+ * event roles carry their event's context; public templates stand alone. */
+export async function chatAboutRole(roleId: string, messages: { role: "user" | "assistant"; content: string }[]) {
+  const role = await db.smmRole.findUnique({
+    where: { id: roleId },
+    select: {
+      name: true, brief: true, payment: true, deadline: true, isPublic: true,
+      event: { select: { title: true, summary: true, budget: true, deadline: true, customer: { select: { name: true } } } },
+      author: { select: { name: true } },
+    },
+  });
+  if (!role) throw ApiError.notFound("Role not found");
+
+  const facts: string[] = [
+    `Роль (ТЗ): ${role.name}`,
+    role.author?.name ? `Автор шаблона: ${role.author.name}` : "",
+    role.event ? `Мероприятие: ${role.event.title}${role.event.customer?.name ? ` (заказчик: ${role.event.customer.name})` : ""}` : "Публичный шаблон (без мероприятия)",
+    role.brief ? `ТЗ роли:\n${role.brief.slice(0, 4000)}` : "",
+    role.payment ? `Оплата: ${role.payment}` : "",
+    role.deadline ? `Срок: ${role.deadline}` : "",
+    role.event?.budget ? `Бюджет мероприятия: ${role.event.budget}` : "",
+    role.event?.deadline ? `Срок мероприятия: ${role.event.deadline}` : "",
+  ].filter(Boolean);
+
+  const system = [
+    "Ты — помощник по SMM-ролям. Роль — это ТЗ (постановка задачи) внутри мероприятия или публичный шаблон задач.",
+    "Отвечай на языке последнего сообщения пользователя. Опирайся ТОЛЬКО на данные роли ниже.",
+    "",
+    "ДАННЫЕ РОЛИ:",
+    ...facts,
+  ].join("\n");
+
+  const { text } = await aiChat({
+    messages: [{ role: "system", content: system }, ...messages],
+    temperature: 0.4,
+    max_tokens: 1200,
+  });
+  return { response: text };
+}
+
+// ---------------------------------------------------------------- запросы --
+
+const REQUEST_STEPS_SELECT = {
+  id: true, title: true, hint: true, answer: true, orderNum: true,
+} as const;
+
+/** My запросы (box=mine) or the PUBLIC templates of all specialists
+ * (box=public — «Публичная библиотека»: people share task templates). */
+export async function listRequests(userId: string, box: "mine" | "public") {
+  if (box === "public") {
+    const rows = await db.smmRequest.findMany({
+      where: { isPublic: true },
+      orderBy: { createdAt: "desc" },
+      take: 60,
+      select: {
+        id: true, specialistId: true, title: true, summary: true,
+        coverColor: true, coverIcon: true, isPublic: true, createdAt: true,
+        specialist: { select: { id: true, name: true, image: true } },
+        steps: { orderBy: { orderNum: "asc" }, select: REQUEST_STEPS_SELECT },
+        _count: { select: { steps: true } },
+      },
+    });
+    return rows.map(r => ({ ...r, stepsCount: r._count.steps, _count: undefined, filledCount: r.steps.filter((s: any) => (s.answer || "").trim()).length }));
+  }
+  const rows = await db.smmRequest.findMany({
+    where: { specialistId: userId },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: {
+      id: true, specialistId: true, title: true, summary: true,
+      coverColor: true, coverIcon: true, isPublic: true, createdAt: true,
+      specialist: { select: { id: true, name: true, image: true } },
+      steps: { orderBy: { orderNum: "asc" }, select: REQUEST_STEPS_SELECT },
+      applications: { select: { id: true, status: true, event: { select: { id: true, title: true } }, role: { select: { id: true, name: true } }, createdAt: true } },
+      _count: { select: { steps: true } },
+    },
+  });
+  return rows.map(r => ({
+    ...r,
+    stepsCount: r._count.steps,
+    _count: undefined,
+    filledCount: r.steps.filter((s: any) => (s.answer || "").trim()).length,
+  }));
+}
+
+export async function getRequest(id: string, userId: string) {
+  const req = await db.smmRequest.findUnique({
+    where: { id },
+    select: {
+      id: true, specialistId: true, title: true, summary: true, coverColor: true,
+      coverIcon: true, isPublic: true, createdAt: true,
+      specialist: { select: { id: true, name: true, image: true } },
+      steps: { orderBy: { orderNum: "asc" }, select: REQUEST_STEPS_SELECT },
+    },
+  });
+  if (!req) throw ApiError.notFound("Request not found");
+  // Own always; foreign — only when public (the link/library rule)
+  if (req.specialistId !== userId && !req.isPublic) throw ApiError.forbidden("Not your запрос");
+  return { ...req, isOwner: req.specialistId === userId };
+}
+
+export async function createRequest(userId: string, body: {
+  title?: string; summary?: string; coverColor?: string | null; coverIcon?: string | null;
+  isPublic?: boolean; steps?: { title?: string; hint?: string; answer?: string }[];
+}) {
+  const me = await db.user.findUnique({ where: { id: userId }, select: { smmRole: true } });
+  if (!me) throw ApiError.unauthorized("Not authenticated");
+  if (!body.title?.trim()) throw ApiError.badRequest("Title is required");
+  return db.smmRequest.create({
+    data: {
+      specialistId: userId,
+      title: body.title.trim(),
+      summary: body.summary || "",
+      coverColor: body.coverColor || null,
+      coverIcon: body.coverIcon || null,
+      isPublic: !!body.isPublic,
+      steps: {
+        create: (body.steps || []).slice(0, 60).map((s, i) => ({
+          title: (s.title || `Шаг ${i + 1}`).slice(0, 200),
+          hint: s.hint || "",
+          answer: s.answer || "",
+          orderNum: i,
+        })),
+      },
+    },
+    include: { steps: { orderBy: { orderNum: "asc" }, select: REQUEST_STEPS_SELECT } },
+  });
+}
+
+export async function updateRequest(id: string, userId: string, body: {
+  title?: string; summary?: string; coverColor?: string | null; coverIcon?: string | null;
+  isPublic?: boolean; steps?: { title?: string; hint?: string; answer?: string }[];
+}) {
+  const req = await db.smmRequest.findUnique({ where: { id }, select: { specialistId: true } });
+  if (!req) throw ApiError.notFound("Request not found");
+  if (req.specialistId !== userId) throw ApiError.forbidden("Not your запрос");
+  const data: any = {};
+  if (body.title !== undefined) data.title = body.title.trim();
+  if (body.summary !== undefined) data.summary = body.summary;
+  if (body.coverColor !== undefined) data.coverColor = body.coverColor;
+  if (body.coverIcon !== undefined) data.coverIcon = body.coverIcon;
+  if (body.isPublic !== undefined) data.isPublic = body.isPublic;
+  if (body.steps !== undefined) {
+    // Steps replace wholesale (the editor submits the full ordered list)
+    data.steps = {
+      deleteMany: {},
+      create: (body.steps || []).slice(0, 60).map((s, i) => ({
+        title: (s.title || `Шаг ${i + 1}`).slice(0, 200),
+        hint: s.hint || "",
+        answer: s.answer || "",
+        orderNum: i,
+      })),
+    };
+  }
+  return db.smmRequest.update({
+    where: { id },
+    data,
+    include: { steps: { orderBy: { orderNum: "asc" }, select: REQUEST_STEPS_SELECT } },
+  });
+}
+
+export async function deleteRequest(id: string, userId: string) {
+  const req = await db.smmRequest.findUnique({ where: { id }, select: { specialistId: true } });
+  if (!req) throw ApiError.notFound("Request not found");
+  if (req.specialistId !== userId) throw ApiError.forbidden("Not your запрос");
+  await db.smmRequest.delete({ where: { id } });
+  return { ok: true };
+}
+
+/** Share a запрос — the exact analogue of shareEvent/shareTest:
+ *   scope "link"      → copy-through;
+ *   scope "community" → OWNER-ONLY flip of isPublic (the public templates
+ *                       library — «Публичная библиотека»). */
+export async function shareRequest(userId: string, requestId: string, body: { scope?: "link" | "community" }) {
+  const scope = body.scope || "link";
+  const req = await db.smmRequest.findUnique({
+    where: { id: requestId },
+    select: { id: true, specialistId: true, isPublic: true },
+  });
+  if (!req) throw ApiError.notFound("Request not found");
+  if (scope === "community") {
+    if (req.specialistId !== userId) throw ApiError.forbidden("Not your запрос");
+    const next = !req.isPublic;
+    await db.smmRequest.update({ where: { id: requestId }, data: { isPublic: next } });
+    return { ok: true, isPublic: next };
+  }
+  return { ok: true, isPublic: req.isPublic };
 }

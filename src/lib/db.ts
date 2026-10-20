@@ -1,8 +1,10 @@
 import { PrismaClient } from '@prisma/client'
 
 // Neon PostgreSQL connection URL - hardcoded as fallback to prevent
-// system DATABASE_URL (e.g., SQLite) from overriding it
-const NEON_DATABASE_URL = 'postgresql://neondb_owner:npg_omga5szZAf4l@ep-shiny-paper-aousfq8l-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require'
+// system DATABASE_URL (e.g., SQLite) from overriding it. Same verified
+// string as .env — the project's own clean database uuu_smm (the old
+// neondb production database stays untouched).
+const NEON_DATABASE_URL = 'postgresql://neondb_owner:npg_omga5szZAf4l@ep-shiny-paper-aousfq8l-pooler.c-2.ap-southeast-1.aws.neon.tech/uuu_smm?sslmode=require'
 
 // CRITICAL: Always ensure DATABASE_URL points to Neon PostgreSQL.
 // System env vars (like SQLite paths) must NOT override this.

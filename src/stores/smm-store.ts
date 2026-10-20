@@ -12,7 +12,7 @@ import type { SmmEventItem, SmmSpecialist } from '@/lib/app-types';
 //   apply   (specialist → event):   role → message → review
 // ---------------------------------------------------------------------------
 
-export type SmmWizardMode = 'invite' | 'apply';
+export type SmmWizardMode = 'invite' | 'apply' | 'send';
 
 interface SmmData {
   // Wizard open state + who/what it targets
@@ -35,6 +35,16 @@ interface SmmData {
   // Personal-library pins: target ids per kind (bookmark buttons on cards)
   smmBmSpecialists: string[];
   smmBmEvents: string[];
+  smmBmRequests: string[];
+  smmBmRoles: string[];
+  // SEND mode (specialist → event): my запросы cache + the picked one
+  wizardRequests: any[];
+  selRequestId: string | null;
+  // The «Отправленные запросы» page opens in edit mode via the dashboard's
+  // «изменить» button (the button routes here with the toggle on)
+  requestsEditMode: boolean;
+  // The dock's «Личные роли | Общие роли» presets the roles page scope
+  rolesScopeRequest: 'mine' | 'public';
 }
 
 const INITIAL: SmmData = {
@@ -51,6 +61,12 @@ const INITIAL: SmmData = {
   specialistCandidates: [],
   smmBmSpecialists: [],
   smmBmEvents: [],
+  smmBmRequests: [],
+  smmBmRoles: [],
+  wizardRequests: [],
+  selRequestId: null,
+  requestsEditMode: false,
+  rolesScopeRequest: 'mine',
 };
 
 export const useSmmStore = makeStore(INITIAL);
@@ -58,7 +74,10 @@ export const useSmmStore = makeStore(INITIAL);
 // Fresh, hook-free read for handlers with stale closures
 export const smmNow = () => useSmmStore.getState();
 
-export function isSmmBookmarked(kind: 'specialist' | 'event', id: string): boolean {
+export function isSmmBookmarked(kind: 'specialist' | 'event' | 'request' | 'role', id: string): boolean {
   const s = smmNow();
-  return (kind === 'specialist' ? s.smmBmSpecialists : s.smmBmEvents).includes(id);
+  return (kind === 'specialist' ? s.smmBmSpecialists
+    : kind === 'event' ? s.smmBmEvents
+    : kind === 'request' ? s.smmBmRequests
+    : s.smmBmRoles).includes(id);
 }

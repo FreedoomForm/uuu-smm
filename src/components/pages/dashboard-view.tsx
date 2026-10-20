@@ -4,6 +4,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic';
 import { AttachmentItem, attachmentFileUrl, formatSize, typeIcon } from '@/components/attachment-utils';
 import LangButton from '@/components/lang-button';
+import { SmmSpecialistDock } from '@/components/pages/smm-requests-view';
+import { SmmCustomerDock } from '@/components/pages/smm-roles-view-dock';
+import { useSmmStore } from '@/stores/smm-store';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,7 +18,8 @@ import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Question } from '@/lib/app-types';
 import { countAnsweredProgress, readTestProgress, type SavedTestProgress } from '@/lib/test-progress';
-import { ArrowLeft, BookOpen, BookmarkX, Bot, Banknote, Bell, Briefcase, Building2, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, ClipboardList, Compass, Dices, Edit, ExternalLink, FlaskConical, Hash, Home, ImagePlus, Landmark, LayoutGrid, Library, Link2, ListChecks, Loader2, MapPin, Megaphone, MessageCircle, Palette, Paperclip, Pencil, Play, Plus, RefreshCw, Rows3, Search, ShieldAlert, Shuffle, Sparkles, Trash2, TreeDeciduous, UserPlus, Users, Video, X } from 'lucide-react';
+import {
+  UserRoundCog, ArrowLeft, BookOpen, BookmarkX, Bot, Banknote, Bell, Briefcase, Building2, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, ClipboardList, Compass, Dices, Edit, ExternalLink, FlaskConical, Hash, Home, ImagePlus, Landmark, LayoutGrid, Library, Link2, ListChecks, Loader2, MapPin, Megaphone, MessageCircle, Palette, Paperclip, Pencil, Play, Plus, RefreshCw, Rows3, Search, ShieldAlert, Shuffle, Sparkles, Trash2, TreeDeciduous, UserPlus, Users, Video, X } from 'lucide-react';
 const AttachmentsEditor = dynamic(() => import('@/components/attachments').then(m => m.AttachmentsEditor), { ssr: false });
 const AttachmentsList = dynamic(() => import('@/components/attachments').then(m => m.AttachmentsList), { ssr: false });
 // Version tree — its own on-demand chunk (fetches the family + renders SVG)
@@ -142,9 +146,16 @@ export interface DashboardViewProps {
   smmBmSpecialists: string[];
   smmBmEvents: string[];
   mySmmRole: 'customer' | 'specialist';
-  openSmmWizard: (mode: 'invite' | 'apply', target: any) => void;
+  openSmmWizard: (mode: 'invite' | 'apply' | 'send', target: any) => void;
   toggleSmmBookmark: (kind: 'specialist' | 'event', id: string) => void;
-  gotoSmmPage: (p: 'smm-events' | 'smm-inbox') => void;
+  gotoSmmPage: (p: 'smm-events' | 'smm-inbox' | 'smm-requests' | 'smm-roles') => void;
+  // The specialist's «+» opens the ЗАПРОС editor; «изменить» routes to the
+  // «Отправленные запросы» page with its edit mode on; the account switcher
+  // cycles заказчик ↔ SMM-специалист (the language-button look).
+  onCreateRequest: () => void;
+  gotoRequestsWithEdit: () => void;
+  onSwitchSmmRole: () => void;
+  switchingRole: boolean;
 }
 
 export default function DashboardView({
@@ -190,6 +201,10 @@ export default function DashboardView({
   openSmmWizard,
   toggleSmmBookmark,
   gotoSmmPage,
+  onCreateRequest,
+  gotoRequestsWithEdit,
+  onSwitchSmmRole,
+  switchingRole,
 }: DashboardViewProps) {
   // ── State: read straight from the zustand domain stores ─────────────────
   // app-root keeps the ACTION handlers (they orchestrate the query cache);
@@ -1025,17 +1040,24 @@ export default function DashboardView({
                     : (viewingUser.name || '?').trim().slice(0, 1).toUpperCase() || '?'}
                 </span>
               )}
-              {/* «+» — in SMM mode the customer's create action is the EVENT
-              creation page (the test editor's twin); the label follows the
-              action. A specialist creates no events — the button hides. */}
+              {/* «+» — the create action follows the account kind: the
+              customer's opens the EVENT editor (the test editor's twin),
+              the SPECIALIST's opens the ЗАПРОС editor (the same twin — a
+              запрос is the specialist's document). Over the tests grids it
+              keeps creating TESTS. */}
               {(!smmActive || mySmmRole === 'customer') && (
                 <Button onClick={startCreateTest} className="rounded-full bg-primary hover:bg-primary/90 shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm">
                   <Plus className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{smmActive && mySmmRole === 'customer' ? t('smmCreateEvent') : t('createTest')}</span>
                 </Button>
               )}
-              {/* The «Изменить» toggle switches the tests edit-mode — it makes
-              no sense over an SMM feed (edits there are per-card on OWN
-              events/specialists), so it hides in SMM mode. */}
+              {smmActive && mySmmRole === 'specialist' && (
+                <Button onClick={onCreateRequest} className="rounded-full bg-primary hover:bg-primary/90 shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm" title={t('smmNewRequest')}>
+                  <Plus className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('smmNewRequest')}</span>
+                </Button>
+              )}
+              {/* «Изменить»: the tests edit-mode over the tests feed; the
+              SPECIALIST's routes to «Отправленные запросы» with its edit
+              mode on (изменять можно свои запросы). */}
               {!smmActive && (
                 <Button
                   variant="outline"
@@ -1043,6 +1065,16 @@ export default function DashboardView({
                   className={`rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm ${editMode ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
                 >
                   <Edit className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('editTest')}</span>
+                </Button>
+              )}
+              {smmActive && mySmmRole === 'specialist' && (
+                <Button
+                  variant="outline"
+                  onClick={gotoRequestsWithEdit}
+                  className="rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm border-black"
+                  title={t('smmEditRequestTitle')}
+                >
+                  <Edit className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('gEdit')}</span>
                 </Button>
               )}
             </div>
@@ -1079,6 +1111,22 @@ export default function DashboardView({
                 </span>
               </Button>
               <LangButton lang={lang} onChange={cycleLang} className="border-black px-2 sm:px-3" />
+              {/* The ACCOUNT SWITCHER — the language-button twin: one tap
+              cycles заказчик ↔ SMM-специалист (persisted in the DB), the
+              whole feed re-resolves to the other account kind. */}
+              {smmActive && (
+                <Button
+                  variant="outline"
+                  onClick={onSwitchSmmRole}
+                  disabled={switchingRole}
+                  title={t('smmSwitchAccount')}
+                  aria-label={t('smmSwitchAccount')}
+                  className="rounded-full shrink-0 border-black h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3 lg:h-10 lg:text-sm font-semibold gap-1.5"
+                >
+                  <UserRoundCog className="w-4 h-4" />
+                  <span className="hidden sm:inline">{mySmmRole === 'customer' ? t('smmRoleCustomer') : t('smmRoleSpecialist')}</span>
+                </Button>
+              )}
               <div className="hidden md:block text-right min-w-0">
                 <p className="text-sm font-medium truncate max-w-[180px]">{effectiveUser?.name}</p>
                 <p className="text-xs text-muted-foreground truncate max-w-[180px]">{effectiveUser?.email}</p>
@@ -1509,6 +1557,8 @@ export default function DashboardView({
                         onToggleBookmark={() => toggleSmmBookmark('event', ev.id)}
                         onOpenProfile={ev.customer ? () => openUserLibrary({ id: ev.customer.id, name: ev.customer.name, image: ev.customer.image }) : undefined}
                         onChat={() => openCardGroupChat({ ...ev, id: `smm-e:${ev.id}`, title: ev.title, smmKind: 'event' })}
+                        onAiDiscuss={() => openAiDiscuss({ ...ev, id: `smm-e:${ev.id}`, title: ev.title, smmKind: 'event' })}
+                        onSend={() => openSmmWizard('send', ev)}
                         onFiles={(ev.filesCount || 0) > 0 ? () => openCardFiles({ ...ev, id: `smm-e:${ev.id}`, title: ev.title, smmKind: 'event' }) : undefined}
                       />
                     );
@@ -1978,59 +2028,65 @@ export default function DashboardView({
           </>
         )}
 
-        {/* LIBRARY PAGES DOCK — the very-bottom panel with the two PAGE
-        buttons standing side by side: Personal library | Public library.
+        {/* LIBRARY PAGES DOCK — the very-bottom panel with the PAGE buttons.
         It lives BELOW the Start-test bottom bar (which floats above it on
         desktop via .desktop-dock-raised) and is rendered in EVERY dashboard
-        state — including the empty/skeleton screens, so a brand-new user can
-        still reach Discover. The active page is highlighted (cta fill), like
-        the old top-panel toggle was. This dock REPLACES that top-panel
-        toggle. The last panel carries the safe-area inset (mobile home
-        bars); the Start bar above it uses a fixed padding now. */}
+        state — including the empty/skeleton screens. The role decides the
+        four buttons: the SPECIALIST gets Личная библиотека | Публичная
+        библиотека | Принятые запросы | Отправленные запросы; the CUSTOMER
+        gets Личные роли | Общие роли | Личное | Общее (the «мероприятия»
+        button is replaced by the roles pages per the brief). A signed-out
+        visitor keeps the classic Личное | Общее pair. The active page is
+        highlighted (cta fill). */}
         <div className="desktop-dock shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
           <div
             className="max-w-2xl mx-auto px-3 sm:px-4 pt-2"
             style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
           >
-            <div className={`grid ${effectiveUser ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
-              {/* SMM third page: the customer's events manager / the specialist's
-              invitations inbox (the brief's «вкладка ролей» + offer flows) */}
-              {effectiveUser && (
+            {effectiveUser && smmActive ? (
+              mySmmRole === 'specialist' ? (
+                <SmmSpecialistDock
+                  lang={lang}
+                  active={discoverMode ? 'public' : 'library'}
+                  gotoLibrary={(d: boolean) => gotoLibraryMode(d)}
+                  gotoInbox={() => gotoSmmPage('smm-inbox')}
+                  gotoRequests={() => gotoSmmPage('smm-requests')}
+                />
+              ) : (
+                <SmmCustomerDock
+                  lang={lang}
+                  active={discoverMode ? 'public' : 'library'}
+                  gotoLibrary={(d: boolean) => gotoLibraryMode(d)}
+                  gotoEvents={() => gotoSmmPage('smm-events')}
+                  gotoRoles={(scope) => { useSmmStore.getState().setRolesScopeRequest(scope); gotoSmmPage('smm-roles'); }}
+                />
+              )
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setPage(mySmmRole === 'customer' ? 'smm-events' : 'smm-inbox')}
+                  onClick={() => gotoLibraryMode(false)}
                   disabled={loading}
-                  title={mySmmRole === 'customer' ? t('smmEventsTitle') : t('smmInboxTitle')}
-                  aria-label={mySmmRole === 'customer' ? t('smmEventsTitle') : t('smmInboxTitle')}
-                  className="min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors border-black bg-white hover:bg-muted/50"
+                  title={`${t('modeMine')} · ${t('modeMineHint')}`}
+                  aria-label={t('modeMine')}
+                  className={`min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${(!discoverMode && !viewingUser) ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`}
                 >
-                  {mySmmRole === 'customer' ? <Briefcase className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" /> : <Bell className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />}
-                  <span className="min-w-0 truncate">{mySmmRole === 'customer' ? t('smmEventsTitle') : t('smmInboxTitle')}</span>
+                  <Library className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
+                  <span className="min-w-0 truncate">{t('modeMine')}</span>
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => gotoLibraryMode(false)}
-                disabled={loading}
-                title={`${t('modeMine')} · ${t('modeMineHint')}`}
-                aria-label={t('modeMine')}
-                className={`min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${(!discoverMode && !viewingUser) ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`}
-              >
-                <Library className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-                <span className="min-w-0 truncate">{t('modeMine')}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => gotoLibraryMode(true)}
-                disabled={loading}
-                title={`${t('modeDiscover')} · ${t('modeDiscoverHint')}`}
-                aria-label={t('modeDiscover')}
-                className={`min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${discoverMode ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`}
-              >
-                <Compass className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
-                <span className="min-w-0 truncate">{t('modeDiscover')}</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => gotoLibraryMode(true)}
+                  disabled={loading}
+                  title={`${t('modeDiscover')} · ${t('modeDiscoverHint')}`}
+                  aria-label={t('modeDiscover')}
+                  className={`min-w-0 flex items-center justify-center gap-1.5 h-9 lg:h-10 px-1 [@media(min-width:420px)]:px-2 rounded-full border-2 text-[11px] [@media(min-width:420px)]:text-xs sm:text-[13px] lg:text-sm font-semibold transition-colors ${discoverMode ? 'bg-cta hover:bg-cta/90 text-white border-cta shadow-md' : 'border-black bg-white hover:bg-muted/50'}`}
+                >
+                  <Compass className="w-4 h-4 shrink-0 [@media(max-width:479px)]:hidden" />
+                  <span className="min-w-0 truncate">{t('modeDiscover')}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

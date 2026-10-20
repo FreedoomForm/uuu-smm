@@ -151,8 +151,13 @@ import SmmWizardView from '@/components/pages/smm-wizard-view';
 import SmmEventsView from '@/components/pages/smm-events-view';
 import SmmEventEditorView from '@/components/pages/smm-event-editor-view';
 import SmmInboxView from '@/components/pages/smm-inbox-view';
+import SmmRequestsView from '@/components/pages/smm-requests-view';
+import SmmRequestEditorView from '@/components/pages/smm-request-editor-view';
+import SmmRequestFillView from '@/components/pages/smm-request-fill-view';
+import SmmRolesView from '@/components/pages/smm-roles-view';
 import { useSmmStore, smmNow } from '@/stores/smm-store';
 import { useEventEditorStore, resetEventForm, eventEditorNow } from '@/stores/event-editor-store';
+import { useRequestEditorStore, resetRequestForm, requestEditorNow } from '@/stores/request-editor-store';
 import CreateEditView from '@/components/pages/create-edit-view';
 import LangButton from '@/components/lang-button';
 import { CreatorStrip, TranslatingPill, topicBgClass, tagHash, coverBgFor, imgSrc, GLASS_TILE } from '@/components/shared-bits';
@@ -702,6 +707,9 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   const wizardBusy = useSmmStore(s => s.wizardBusy);
   const smmBmSpecialists = useSmmStore(s => s.smmBmSpecialists);
   const smmBmEvents = useSmmStore(s => s.smmBmEvents);
+  const smmBmRequests = useSmmStore(s => s.smmBmRequests);
+  const smmBmRoles = useSmmStore(s => s.smmBmRoles);
+  const requestsEditModeFlag = useSmmStore(s => s.requestsEditMode);
   const refreshSmmFeed = useCallback(async (scopeOverride?: 'mine' | 'discover') => {
     const st = useSessionStore.getState();
     const uid = st.user?.id || st.hydratedUser?.id;
@@ -719,6 +727,8 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
       const st = useSmmStore.getState();
       st.setSmmBmSpecialists(r.pairs.filter(p => p.targetType === 'specialist').map(p => p.targetId));
       st.setSmmBmEvents(r.pairs.filter(p => p.targetType === 'event').map(p => p.targetId));
+      st.setSmmBmRequests(r.pairs.filter(p => p.targetType === 'request').map(p => p.targetId));
+      st.setSmmBmRoles(r.pairs.filter(p => p.targetType === 'role').map(p => p.targetId));
     }).catch(() => {});
   }, []);
 
@@ -733,6 +743,22 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   const [focusEventId, setFocusEventId] = useState<string | null>(null);
   const eventsScopeRef = useRef(eventsScope);
   eventsScopeRef.current = eventsScope;
+  // ── ЗАПРОСЫ (the specialist's structured proposals) + РОЛИ pages state ──
+  const [requestsScope, setRequestsScope] = useState<'mine' | 'public'>('mine');
+  const [requestsItems, setRequestsItems] = useState<any[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [focusRequestId, setFocusRequestId] = useState<string | null>(null);
+  const [deleteRequestId, setDeleteRequestId] = useState<string | null>(null);
+  const [requestSaving, setRequestSaving] = useState(false);
+  // The filling screen (the test-taking twin): the запрос being filled with
+  // its editable steps + the save spinner
+  const [fillRequest, setFillRequest] = useState<any | null>(null);
+  const [fillBusy, setFillBusy] = useState(false);
+  // ── РОЛИ (the customer's «Личные роли» + «Общие роли») pages state ──
+  const [rolesScope, setRolesScope] = useState<'mine' | 'public'>('mine');
+  const [rolesItems, setRolesItems] = useState<any[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [myEventsCache, setMyEventsCache] = useState<any[]>([]);
   const refreshEventsFeed = useCallback(async (scopeOverride?: 'mine' | 'discover', focusId?: string | null) => {
     const st = useSessionStore.getState();
     const uid = st.user?.id || st.hydratedUser?.id;
@@ -1139,6 +1165,29 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
       if (String(e?.message || '').toLowerCase().includes('not found')) setDeadLink(true);
       else cleanUrl();
     });
+  });
+
+  // Shared REQUEST link (?request=<id>): open that запрос's card on the
+  // «Отправленные запросы» page — the запрос analogue of the ?event= link.
+  // Own запросы always open; foreign ones only when public (the server
+  // enforces the same rule on GET /api/smm/requests/[id]).
+  const sharedRequestHandledRef = useRef(false);
+  useEffect(() => {
+    if (sharedRequestHandledRef.current || !dataReady || !effectiveUser || effectivePage !== 'dashboard') return;
+    let raw: string | null = null;
+    try { raw = new URLSearchParams(window.location.search).get('request'); } catch { raw = null; }
+    if (!raw) return;
+    sharedRequestHandledRef.current = true;
+    const id = raw.trim().slice(0, 40);
+    const cleanUrl = () => { try { window.history.replaceState({}, '', window.location.pathname); } catch {} };
+    api.getSmmRequest(id).then((detail: any) => {
+      const own = detail.specialistId === effectiveUser.id;
+      setRequestsScope(own ? 'mine' : 'public');
+      setRequestsItems(prev => (prev.some(x => x.id === id) ? prev : [detail, ...prev]));
+      setFocusRequestId(id);
+      setPage('smm-requests');
+      cleanUrl();
+    }).catch(() => cleanUrl());
   });
 
   // Every open of the events page revalidates its feed in the background
@@ -2909,7 +2958,7 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   // «Подать заявку» (specialist → event) / «Пригласить» (customer →
   // specialist): the wizard in the same full-screen window the question
   // cards used. invite preloads the customer's own events for the pick.
-  const openSmmWizard = async (mode: 'invite' | 'apply', target: any) => {
+  const openSmmWizard = async (mode: 'invite' | 'apply' | 'send', target: any) => {
     if (isGuestNow()) { setRegisterWall('home'); return; }
     const st = useSmmStore.getState();
     st.setWizardMode(mode);
@@ -2929,23 +2978,40 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
         if ((evs || []).length === 1) st.setSelEventId(evs[0].id);
       } catch { st.setMyEvents([]); }
     }
+    if (mode === 'send') {
+      // The SEND flow picks one of the specialist's own запросы
+      st.setSelRequestId(null);
+      try {
+        const mine = await api.getSmmRequests('mine');
+        st.setWizardRequests(mine || []);
+      } catch { st.setWizardRequests([]); }
+    }
     setPage('smm-wizard');
   };
   // Personal-library pin for SMM entities (customer pins specialists,
   // specialist pins events) — optimistic, like the test bookmarks.
-  const toggleSmmBookmark = async (kind: 'specialist' | 'event', id: string) => {
+  const toggleSmmBookmark = async (kind: 'specialist' | 'event' | 'request' | 'role', id: string) => {
     if (isGuestNow()) { setRegisterWall('home'); return; }
     const st = useSmmStore.getState();
-    const curList = kind === 'specialist' ? st.smmBmSpecialists : st.smmBmEvents;
+    const curList = kind === 'specialist' ? st.smmBmSpecialists
+      : kind === 'event' ? st.smmBmEvents
+      : kind === 'request' ? st.smmBmRequests
+      : st.smmBmRoles;
     const has = curList.includes(id);
     const nextList = has ? curList.filter(x => x !== id) : [...curList, id];
-    if (kind === 'specialist') st.setSmmBmSpecialists(nextList); else st.setSmmBmEvents(nextList);
+    if (kind === 'specialist') st.setSmmBmSpecialists(nextList);
+    else if (kind === 'event') st.setSmmBmEvents(nextList);
+    else if (kind === 'request') st.setSmmBmRequests(nextList);
+    else st.setSmmBmRoles(nextList);
     try {
       if (has) await api.removeSmmBookmark(kind, id);
       else await api.addSmmBookmark(kind, id);
-      if (!navNow().discoverMode) refreshSmmFeed('mine');
+      if (!navNow().discoverMode && (kind === 'specialist' || kind === 'event')) refreshSmmFeed('mine');
     } catch (e: any) {
-      if (kind === 'specialist') st.setSmmBmSpecialists(curList); else st.setSmmBmEvents(curList);
+      if (kind === 'specialist') st.setSmmBmSpecialists(curList);
+      else if (kind === 'event') st.setSmmBmEvents(curList);
+      else if (kind === 'request') st.setSmmBmRequests(curList);
+      else st.setSmmBmRoles(curList);
       toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
     }
   };
@@ -2966,6 +3032,11 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
       if (st.wizardMode === 'invite') {
         await api.createSmmInvitation({ eventId: st.selEventId!, roleId: st.selRoleId!, specialistId: st.wizardSpecialist!.id, message: st.wizardMessage });
         toast({ title: t('smmInviteSentTitle'), description: t('smmInviteSentDesc') });
+      } else if (st.wizardMode === 'send') {
+        // The structured запрос goes to the event's role — the application
+        // carries the requestId so the customer sees the full step structure.
+        await api.createSmmApplication({ eventId: st.wizardEvent!.id, roleId: st.selRoleId!, requestId: st.selRequestId || undefined, message: st.wizardMessage });
+        toast({ title: t('smmRequestSentTitle'), description: t('smmRequestSentDesc') });
       } else {
         await api.createSmmApplication({ eventId: st.wizardEvent!.id, roleId: st.selRoleId!, message: st.wizardMessage });
         toast({ title: t('smmApplicationSentTitle'), description: t('smmApplicationSentDesc') });
@@ -2979,7 +3050,10 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
       st.setWizardStep(0);
       st.setInvitePickSpecialist(false);
       st.setSpecialistCandidates([]);
-      setPage(fromEventsPage ? 'smm-events' : 'dashboard');
+      st.setSelRequestId(null);
+      st.setWizardRequests([]);
+      const fromRequests = st.wizardMode === 'send';
+      setPage(fromEventsPage ? 'smm-events' : fromRequests ? 'smm-requests' : 'dashboard');
       refreshSmmFeed();
       if (fromEventsPage) void refreshEventsFeed();
     } catch (e: any) {
@@ -2987,7 +3061,290 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     }
     st.setWizardBusy(false);
   };
-  const gotoSmmPage = (p: 'smm-events' | 'smm-inbox') => setPage(p);
+  const gotoSmmPage = (p: 'smm-events' | 'smm-inbox' | 'smm-requests' | 'smm-roles') => setPage(p);
+
+  // ═════════════════════════ ЗАПРОС handlers ══════════════════════════════
+  const refreshRequests = useCallback(async (scopeOverride?: 'mine' | 'public') => {
+    const scope = scopeOverride || requestsScope;
+    setRequestsLoading(true);
+    try {
+      setRequestsItems(await api.getSmmRequests(scope));
+    } catch { /* transient */ }
+    setRequestsLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestsScope]);
+
+  const changeRequestsScope = useCallback((s2: 'mine' | 'public') => {
+    setRequestsScope(s2);
+    void refreshRequests(s2);
+  }, [refreshRequests]);
+
+  // The «Отправленные запросы» page refreshes whenever it opens
+  useEffect(() => {
+    if (effectivePage === 'smm-requests' && effectiveUser) void refreshRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectivePage === 'smm-requests', effectiveUser?.id]);
+
+  const startCreateRequest = () => {
+    resetRequestForm();
+    setPage('smm-request-editor');
+  };
+
+  const startEditRequest = async (rq: any) => {
+    try {
+      const fresh = await api.getSmmRequest(rq.id);
+      resetRequestForm();
+      useRequestEditorStore.setState({
+        rqTitle: fresh.title || '',
+        rqSummary: fresh.summary || '',
+        rqCoverColor: fresh.coverColor || '',
+        rqIsPublic: !!fresh.isPublic,
+        steps: (fresh.steps || []).map((st: any) => ({ id: st.id, title: st.title || '', hint: st.hint || '', answer: st.answer || '' })),
+        editingRequestId: fresh.id,
+        rqStepsExpanded: true,
+      });
+      setPage('smm-request-editor');
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const handleSaveRequest = async () => {
+    if (requestSaving) return;
+    const st = requestEditorNow();
+    if (!st.rqTitle.trim()) return;
+    setRequestSaving(true);
+    try {
+      const payload = {
+        title: st.rqTitle.trim(),
+        summary: st.rqSummary,
+        coverColor: st.rqCoverColor || null,
+        coverIcon: null as string | null,
+        isPublic: st.rqIsPublic,
+        steps: st.steps.map((st2: any) => ({ title: st2.title, hint: st2.hint, answer: st2.answer })),
+      };
+      if (st.editingRequestId) {
+        await api.updateSmmRequest(st.editingRequestId, payload);
+        toast({ title: t('smmRequestSavedToast') });
+        setFocusRequestId(st.editingRequestId);
+      } else {
+        const created = await api.createSmmRequest(payload);
+        toast({ title: t('smmRequestCreated') });
+        setFocusRequestId(created.id);
+      }
+      setRequestsScope('mine');
+      await refreshRequests('mine');
+      setPage('smm-requests');
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+    setRequestSaving(false);
+  };
+
+  const doShareRequestLink = async (rq: any) => {
+    try {
+      await api.shareSmmRequest(rq.id, 'link');
+      const link = `${window.location.origin}/?request=${rq.id}`;
+      try { await navigator.clipboard.writeText(link); toast({ title: t('linkCopied') }); }
+      catch { toast({ title: link }); }
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const doMakeRequestPublic = async (rq: any) => {
+    try {
+      const res = await api.shareSmmRequest(rq.id, 'community');
+      setRequestsItems(prev => prev.map(x => (x.id === rq.id ? { ...x, isPublic: res.isPublic } : x)));
+      toast({ title: res.isPublic ? t('smmMakePublicBtn') : t('smmMakeLinkOnly') });
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const confirmDeleteRequest = async () => {
+    const id = deleteRequestId;
+    setDeleteRequestId(null);
+    if (!id) return;
+    try {
+      await api.deleteSmmRequest(id);
+      setRequestsItems(prev => prev.filter(x => x.id !== id));
+      toast({ title: t('smmRequestDeleted') });
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  // «Взять шаблон» on a foreign PUBLIC запрос: copies the structure into the
+  // specialist's own library (the template economy — take, adapt, send).
+  const takeRequestTemplate = async (rq: any) => {
+    if (isGuestNow()) { setRegisterWall('home'); return; }
+    try {
+      const fresh = await api.getSmmRequest(rq.id);
+      const created = await api.createSmmRequest({
+        title: fresh.title,
+        summary: fresh.summary || '',
+        coverColor: fresh.coverColor || null,
+        isPublic: false,
+        steps: (fresh.steps || []).map((st: any) => ({ title: st.title, hint: st.hint, answer: st.answer || '' })),
+      });
+      toast({ title: t('smmRequestCreated') });
+      setRequestsScope('mine');
+      await refreshRequests('mine');
+      setFocusRequestId(created.id);
+      setPage('smm-requests');
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  // ── The FILLING screen (the test-taking twin) ──
+  const startFillRequest = async (rq: any) => {
+    try {
+      const fresh = await api.getSmmRequest(rq.id);
+      setFillRequest(fresh);
+      setPage('smm-request-fill');
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const handleFillAnswerChange = (stepId: string, answer: string) => {
+    setFillRequest((prev: any) => prev ? { ...prev, steps: prev.steps.map((st: any) => (st.id === stepId ? { ...st, answer } : st)) } : prev);
+  };
+
+  const handleFillSaveAnswers = async () => {
+    if (!fillRequest || fillBusy) return;
+    setFillBusy(true);
+    try {
+      await api.updateSmmRequest(fillRequest.id, {
+        steps: (fillRequest.steps || []).map((st: any) => ({ title: st.title, hint: st.hint, answer: st.answer || '' })),
+      });
+      toast({ title: t('smmFillSaved') });
+      setRequestsScope('mine');
+      await refreshRequests('mine');
+      setFocusRequestId(fillRequest.id);
+      setFillRequest(null);
+      setPage('smm-requests');
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+    setFillBusy(false);
+  };
+
+  // «Отправить запрос» — the SEND wizard (запрос → роль → сообщение → обзор)
+  const openSmmSendWizard = async (target: any) => {
+    if (isGuestNow()) { setRegisterWall('home'); return; }
+    const st = smmNow();
+    st.setWizardMode('send');
+    st.setWizardSpecialist(null);
+    st.setWizardEvent(target);
+    st.setSelEventId(null);
+    st.setSelRoleId(null);
+    st.setWizardMessage('');
+    st.setWizardStep(0);
+    st.setWizardBusy(false);
+    st.setInvitePickSpecialist(false);
+    st.setSpecialistCandidates([]);
+    st.setSelRequestId(null);
+    try {
+      const mine = await api.getSmmRequests('mine');
+      st.setWizardRequests(mine || []);
+    } catch { st.setWizardRequests([]); }
+    setPage('smm-wizard');
+  };
+
+  // ── РОЛИ handlers (the customer's «Личные роли» / «Общие роли») ──
+  const refreshRoles = useCallback(async (scopeOverride?: 'mine' | 'public') => {
+    const scope = scopeOverride || rolesScope;
+    setRolesLoading(true);
+    try {
+      setRolesItems(await api.getSmmRoles(scope));
+    } catch { /* transient */ }
+    setRolesLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rolesScope]);
+
+  const changeRolesScope = useCallback((s2: 'mine' | 'public') => {
+    setRolesScope(s2);
+    void refreshRoles(s2);
+  }, [refreshRoles]);
+
+  useEffect(() => {
+    if (effectivePage === 'smm-roles' && effectiveUser) {
+      // The dock preset wins: «Личные роли»/«Общие роли» buttons carry the
+      // scope they want the page to open with.
+      const preset = smmNow().rolesScopeRequest;
+      setRolesScope(preset);
+      void refreshRoles(preset);
+      api.getMySmmEvents().then((evs: any[]) => setMyEventsCache(evs || [])).catch(() => setMyEventsCache([]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectivePage === 'smm-roles', effectiveUser?.id]);
+
+  const doShareRoleTemplate = async (role: any) => {
+    try {
+      const next = !role.isPublic;
+      await api.updateSmmRole(role.id, { isPublic: next });
+      setRolesItems(prev => prev.map(x => (x.id === role.id ? { ...x, isPublic: next } : x)));
+      toast({ title: next ? t('smmShareRoleTpl') : t('smmUnshareRoleTpl') });
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const doAttachRoleTemplate = async (roleId: string, eventId: string) => {
+    try {
+      await api.attachSmmRoleTemplate(roleId, eventId);
+      toast({ title: t('smmRoleTplAdded') });
+      void refreshRoles();
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const doDeleteRoleTemplate = async (role: any) => {
+    try {
+      await api.deleteSmmRole(role.id);
+      setRolesItems(prev => prev.filter(x => x.id !== role.id));
+      toast({ title: t('smmRequestDeleted') });
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const doEditRoleInline = async (role: any) => {
+    // A prompt-free inline edit is heavy; route to the event's manage window
+    // (the roles tab) — the exact surface the customer edits roles on.
+    if (role.event?.id) {
+      changeEventsScope('mine');
+      setPage('smm-events');
+    }
+  };
+
+  // ── The ACCOUNT SWITCHER (заказчик ↔ SMM-специалист) — the top-panel
+  // button styled like the language switcher: one tap cycles the account
+  // kind, persisted via PUT /api/smm/profile, the feed re-resolves.
+  const [switchingRole, setSwitchingRole] = useState(false);
+  const switchSmmRole = async () => {
+    if (switchingRole || !effectiveUser) return;
+    const next = mySmmRole === 'customer' ? 'specialist' : 'customer';
+    setSwitchingRole(true);
+    try {
+      await api.switchSmmRole(next);
+      const patch = { ...effectiveUser, smmRole: next } as any;
+      setUser({ id: patch.id, email: patch.email, name: patch.name, smmRole: next });
+      useSessionStore.getState().setUser(patch);
+      useSessionStore.getState().setHydratedUser(patch);
+      toast({ title: next === 'customer' ? t('smmSwitchedCustomer') : t('smmSwitchedSpecialist') });
+      // The feed kind flips with the account: re-resolve both SMM feeds
+      setRequestsItems([]); setRolesItems([]);
+      refreshSmmFeed();
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.message || 'Error', variant: 'destructive' });
+    }
+    setSwitchingRole(false);
+  };
   // The window's open effect: resume the test's most recent thread — or
   // spawn a fresh (empty, unsaved) one, «Новый чат» style. No passport.
   React.useEffect(() => {
@@ -3051,11 +3408,19 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     }
     setChatLoading(true);
     try {
-      // SMM specialist thread («smm-u:<id>»)? The AI prompt is built from the
-      // person's анкета server-side; otherwise it's the whole-test tutor.
-      const result = String(testId).startsWith('smm-u:')
-        ? await api.chatAboutSpecialist(String(testId).slice(5), newMsgs)
-        : await api.chatAboutTest(testId, newMsgs);
+      // SMM entity threads («smm-u:<id>» specialist / «smm-e:<id>» event /
+      // «smm-r:<id>» запрос)? The AI prompt is built server-side from that
+      // entity's data; otherwise it's the whole-test tutor.
+      const tidStr = String(testId);
+      const result = tidStr.startsWith('smm-u:')
+        ? await api.chatAboutSpecialist(tidStr.slice(5), newMsgs)
+        : tidStr.startsWith('smm-e:')
+          ? await api.chatAboutEvent(tidStr.slice(5), newMsgs)
+          : tidStr.startsWith('smm-r:')
+            ? await api.chatAboutRequest(tidStr.slice(5), newMsgs)
+            : tidStr.startsWith('smm-role:')
+              ? await api.chatAboutRole(tidStr.slice(9), newMsgs)
+              : await api.chatAboutTest(testId, newMsgs);
       if (result.response) {
         const assistantMsg = { role: 'assistant' as const, content: result.response };
         const finalMsgs = [...newMsgs, assistantMsg];
@@ -4423,6 +4788,10 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
           openSmmWizard={openSmmWizard}
           toggleSmmBookmark={toggleSmmBookmark}
           gotoSmmPage={gotoSmmPage}
+          onCreateRequest={startCreateRequest}
+          gotoRequestsWithEdit={() => { useSmmStore.getState().setRequestsEditMode(true); setPage('smm-requests'); }}
+          onSwitchSmmRole={switchSmmRole}
+          switchingRole={switchingRole}
         />
         {/* THE DASHBOARD AI WINDOW — «Обсудить с ИИ»: opens STRAIGHT INTO the
         conversation (the test's most recent thread, or a fresh one); the AI
@@ -4677,6 +5046,7 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
           }}
           onOpenProfilePage={() => setPage('profile')}
           onCycleLang={cycleLang}
+          onGotoRoles={(rs: 'mine' | 'public') => { useSmmStore.getState().setRolesScopeRequest(rs); setPage('smm-roles'); }}
         />
         <AlertDialog open={!!deleteEventId} onOpenChange={() => setDeleteEventId(null)}>
           <AlertDialogContent>
@@ -4693,9 +5063,111 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
       </>
     );
   }
-  // SMM INBOX — the specialist's invitations + application statuses.
+  // SMM INBOX — «Принятые запросы»: the requests the specialist RECEIVED
+  // (invitations from customers) + the statuses of the sent ones. The same
+  // top panel + the same specialist dock as every other specialist page.
   if (effectivePage === 'smm-inbox') {
-    return <SmmInboxView goHome={() => setPage('dashboard')} />;
+    return (
+      <SmmInboxView
+        goHome={() => setPage('dashboard')}
+        gotoLibrary={(discover: boolean) => { if (discover !== navNow().discoverMode) toggleDiscoverMode(); setPage('dashboard'); }}
+        gotoRequests={() => setPage('smm-requests')}
+        onCycleLang={cycleLang}
+      />
+    );
+  }
+
+  // SMM REQUESTS — «Отправленные запросы»: my запросы + the public templates
+  // library. The dashboard's twin with the request cards (the full ladder).
+  if (effectivePage === 'smm-requests') {
+    return (
+      <SmmRequestsView
+        user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '' } : null}
+        myAvatar={myAvatar}
+        requests={requestsItems}
+        loading={requestsLoading}
+        scope={requestsScope}
+        onScopeChange={changeRequestsScope}
+        pinnedRequestIds={smmBmRequests}
+        focusRequestId={focusRequestId}
+        initialEditMode={requestsEditModeFlag}
+        onInitialEditConsumed={() => useSmmStore.getState().setRequestsEditMode(false)}
+        goHome={() => setPage('dashboard')}
+        onCreateRequest={startCreateRequest}
+        onEditRequest={startEditRequest}
+        onDeleteRequest={(rq: any) => setDeleteRequestId(rq.id)}
+        onShareRequest={doShareRequestLink}
+        onPublicRequest={doMakeRequestPublic}
+        onTakeTemplate={takeRequestTemplate}
+        onFillRequest={startFillRequest}
+        onSendRequest={openSmmSendWizard}
+        onChat={(rq: any) => openSmmGroupChat('specialist', { id: rq.specialistId || rq.specialist?.id, name: rq.specialist?.name || rq.title })}
+        onAiChat={(rq: any) => openAiDiscuss({ ...rq, id: `smm-r:${rq.id}`, title: rq.title, smmKind: 'request' })}
+        onToggleBookmark={(id: string) => void toggleSmmBookmark('request', id)}
+        onOpenProfileUser={(u: any) => openUserLibrary(u)}
+        onOpenProfilePage={() => setPage('profile')}
+        onCycleLang={cycleLang}
+        gotoLibrary={(discover: boolean) => { if (discover !== navNow().discoverMode) toggleDiscoverMode(); setPage('dashboard'); }}
+        gotoInbox={() => setPage('smm-inbox')}
+      />
+    );
+  }
+
+  // SMM REQUEST EDITOR — the «+» / «изменить» full-page editor, the visual
+  // twin of the test editor (title, summary, cover, steps, save bar).
+  if (effectivePage === 'smm-request-editor') {
+    return (
+      <SmmRequestEditorView
+        goHome={() => setPage('smm-requests')}
+        handleSaveRequest={handleSaveRequest}
+        busy={requestSaving}
+      />
+    );
+  }
+
+  // SMM REQUEST FILL — the test-taking twin: one STEP CARD per slide, the
+  // answers save on the last slide.
+  if (effectivePage === 'smm-request-fill') {
+    return (
+      <SmmRequestFillView
+        request={fillRequest}
+        busy={fillBusy}
+        onAnswerChange={handleFillAnswerChange}
+        onSaveAnswers={handleFillSaveAnswers}
+        goHome={() => { setFillRequest(null); setPage('smm-requests'); }}
+      />
+    );
+  }
+
+  // SMM ROLES — the customer's «Личные роли» (their roles across their
+  // events) + «Общие роли» (public task templates people share).
+  if (effectivePage === 'smm-roles') {
+    return (
+      <SmmRolesView
+        user={effectiveUser ? { id: effectiveUser.id, name: effectiveUser.name, email: (effectiveUser as any).email || '' } : null}
+        myAvatar={myAvatar}
+        roles={rolesItems}
+        loading={rolesLoading}
+        scope={rolesScope}
+        onScopeChange={changeRolesScope}
+        myEvents={myEventsCache}
+        goHome={() => setPage('dashboard')}
+        onCreateEvent={startCreateEvent}
+        onEditRole={doEditRoleInline}
+        onDeleteRole={doDeleteRoleTemplate}
+        onShareRole={doShareRoleTemplate}
+        onAttachRole={(role: any, eventId: string) => doAttachRoleTemplate(role.id, eventId)}
+        onOpenEvent={(ev: any) => { changeEventsScope('mine'); setEventsItems(prev => (prev.some(x => x.id === ev.id) ? prev : prev)); setFocusEventId(ev.id); setPage('smm-events'); }}
+        onChat={(role: any) => openSmmGroupChat('event', role.event || { id: role.eventId, name: role.name })}
+        onAiChat={(role: any) => openAiDiscuss({ ...role, id: `smm-role:${role.id}`, title: role.name, smmKind: 'role' })}
+        onToggleBookmark={(id: string) => void toggleSmmBookmark('role', id)}
+        onOpenProfileUser={(u: any) => openUserLibrary(u)}
+        onOpenProfilePage={() => setPage('profile')}
+        onCycleLang={cycleLang}
+        gotoLibrary={(discover: boolean) => { if (discover !== navNow().discoverMode) toggleDiscoverMode(); setPage('dashboard'); }}
+        gotoEvents={() => setPage('smm-events')}
+      />
+    );
   }
 
   // TAKE TEST + RESULTS (view extracted to src/components/pages/take-test-view.tsx)

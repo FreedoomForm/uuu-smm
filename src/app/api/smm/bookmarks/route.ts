@@ -1,5 +1,6 @@
-// GET    /api/smm/bookmarks?targetType=specialist|event — pinned ids
-// POST   /api/smm/bookmarks — pin a specialist / event to the personal library
+// GET    /api/smm/bookmarks?targetType=specialist|event|request|role — pinned ids
+// POST   /api/smm/bookmarks — pin a specialist / event / запрос / role template
+//        to the personal library
 // DELETE /api/smm/bookmarks?targetType=…&targetId=… — unpin
 import { NextResponse } from "next/server";
 import { withApiAuth } from "@/server/http/handler";
@@ -9,7 +10,7 @@ import { addSmmBookmark, listSmmBookmarks, removeSmmBookmark } from "@/server/se
 
 export const GET = withApiAuth(async ({ userId, searchParams }) => {
   const t = searchParams.get("targetType");
-  const targetType = t === "specialist" || t === "event" ? t : undefined;
+  const targetType = t === "specialist" || t === "event" || t === "request" || t === "role" ? t : undefined;
   return NextResponse.json(await listSmmBookmarks(userId, targetType));
 });
 
@@ -24,7 +25,7 @@ export const POST = withApiAuth(
 export const DELETE = withApiAuth(
   async ({ userId, searchParams }) => {
     const t = searchParams.get("targetType");
-    const targetType = t === "specialist" || t === "event" ? t : null;
+    const targetType = t === "specialist" || t === "event" || t === "request" || t === "role" ? t : null;
     const targetId = (searchParams.get("targetId") || "").slice(0, 64);
     if (!targetType || !targetId) throw new Error("targetType and targetId are required");
     return NextResponse.json(await removeSmmBookmark(userId, targetType, targetId));

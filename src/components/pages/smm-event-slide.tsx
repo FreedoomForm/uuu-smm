@@ -3,8 +3,8 @@
 import React from 'react';
 import { SwiperSlide } from 'swiper/react';
 import {
-  Banknote, BookmarkX, Bot, Building2, CalendarClock, CheckCircle2, ClipboardList,
-  Landmark, Link2, MapPin, MessageCircle, Paperclip, Pencil, ShieldAlert, Trash2,
+  Banknote, Bot, BookmarkX, Building2, CalendarClock, CheckCircle2, ClipboardList,
+  Landmark, Link2, MapPin, MessageCircle, Paperclip, Pencil, Send, ShieldAlert, Trash2,
   UserPlus, Users, ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,11 @@ export interface SmmEventSlideProps {
   onToggleBookmark: () => void;
   onOpenProfile?: () => void;
   onChat: () => void;
+  onAiDiscuss?: () => void;
+  // «Отправить запрос» — the specialist sends one of their запросы to this
+  // event (the wizard opens in the send mode). Rendered on the cards the
+  // specialist sees (the bookmarks library + the discover feed).
+  onSend?: () => void;
   onFiles?: () => void;
   onShare?: () => void;
   onPublic?: () => void;
@@ -47,7 +52,7 @@ export interface SmmEventSlideProps {
 
 export default function SmmEventSlide({
   ev, pinned, isOwner, editMode = false, showUnpin = false,
-  onToggleBookmark, onOpenProfile, onChat, onFiles,
+  onToggleBookmark, onOpenProfile, onChat, onAiDiscuss, onSend, onFiles,
   onShare, onPublic, onManage, onEdit, onDelete,
   onOpenOtherEvent, children,
 }: SmmEventSlideProps) {
@@ -129,9 +134,23 @@ export default function SmmEventSlide({
             <>
               <button type="button" onClick={onChat} className={btn}>
                 <MessageCircle className="w-4 h-4 shrink-0" />
-                <span className="font-semibold text-sm">{t('chat')}</span>
+                <span className="font-semibold text-sm">{t('gChat')}</span>
                 <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
               </button>
+              {onAiDiscuss && (
+                <button type="button" onClick={onAiDiscuss} className={btn}>
+                  <Bot className="w-4 h-4 shrink-0" />
+                  <span className="font-semibold text-sm">{t('smmAiChat')}</span>
+                  <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
+                </button>
+              )}
+              {onSend && !isOwner && (
+                <button type="button" onClick={onSend} className={btn}>
+                  <Send className="w-4 h-4 shrink-0" />
+                  <span className="font-semibold text-sm">{t('smmSendRequestBtn')}</span>
+                  <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
+                </button>
+              )}
               {(ev.filesCount || 0) > 0 && onFiles && (
                 <button type="button" onClick={onFiles} className={btn}>
                   <Paperclip className="w-4 h-4 shrink-0" />
@@ -200,7 +219,7 @@ export default function SmmEventSlide({
 // the test grid card: creator strip, title, summary and a one-per-line
 // action ladder. Shared by the dashboard's SMM grids and the events page.
 export function SmmEventGridCard({
-  ev, pinned, isOwner, onToggleBookmark, onOpenProfile, onChat, onFiles,
+  ev, pinned, isOwner, onToggleBookmark, onOpenProfile, onChat, onAiDiscuss, onSend, onFiles,
   onShare, onPublic, onManage, onEdit, onDelete, onOpen,
 }: {
   ev: any;
@@ -209,6 +228,8 @@ export function SmmEventGridCard({
   onToggleBookmark: () => void;
   onOpenProfile?: () => void;
   onChat: () => void;
+  onAiDiscuss?: () => void;
+  onSend?: () => void;
   onFiles?: () => void;
   onShare?: () => void;
   onPublic?: () => void;
@@ -267,6 +288,16 @@ export function SmmEventGridCard({
         <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); onChat(); }} title={t('chatWithAll')} aria-label={t('chatWithAll')} className={ladderBtn}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
         </Button>
+        {onAiDiscuss && (
+          <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); onAiDiscuss(); }} title={t('smmAiChat')} aria-label={t('smmAiChat')} className={ladderBtn}>
+            <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmAiChat')}</span>
+          </Button>
+        )}
+        {onSend && !isOwner && (
+          <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); onSend(); }} title={t('smmSendRequestBtn')} aria-label={t('smmSendRequestBtn')} className={ladderBtn}>
+            <Send className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmSendRequestBtn')}</span>
+          </Button>
+        )}
         {(ev.filesCount || 0) > 0 && onFiles && (
           <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); onFiles(); }} title={t('attachedFiles', { n: ev.filesCount })} aria-label={t('attachedFiles', { n: ev.filesCount })} className={ladderBtn}>
             <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>

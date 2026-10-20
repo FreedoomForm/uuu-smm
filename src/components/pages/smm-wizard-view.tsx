@@ -7,7 +7,7 @@ import { Mousewheel } from 'swiper/modules';
 import type { Swiper as SwiperClass } from 'swiper';
 import {
   ArrowLeft, Banknote, Briefcase, Building2, CalendarClock, CheckCircle2,
-  ChevronRight, FileText, Loader2, Megaphone, MessageSquareMore, ShieldAlert, UserRoundSearch,
+  ChevronRight, FileText, ListOrdered, Loader2, Megaphone, MessageSquareMore, ShieldAlert, UserRoundSearch,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,27 +57,38 @@ export default function SmmWizardView({ goHome, onConfirm, onCreateEvent }: SmmW
   const [activeIdx, setActiveIdx] = React.useState(0);
 
   const isInvite = wizardMode === 'invite';
-  // The role list: the chosen event's roles (invite) or the target's roles (apply)
+  const isSend = wizardMode === 'send';
+  // The role list: the chosen event's roles (invite) or the target's roles (apply/send)
   const srcEvent: SmmEventItem | null = isInvite
     ? (myEvents.find(e => e.id === selEventId) || null)
     : wizardEvent;
   const roles: SmmRoleItem[] = srcEvent?.roles || [];
+  // SEND mode: the specialist's запросы (fetched when the wizard opened)
+  const wizardRequests = useSmmStore(s => s.wizardRequests);
+  const selRequestId = useSmmStore(s => s.selRequestId);
+  const setSelRequestId = useSmmStore(s => s.setSelRequestId);
+  const selRequest: any = wizardRequests.find(r => r.id === selRequestId) || null;
 
   // Stage keys — each becomes one slide in the select phase. Invites opened
   // FROM the events page preset the event and add the «specialist» pick
-  // stage (the flow is event → role → WHO → message).
+  // stage (the flow is event → role → WHO → message). SEND: запрос → роль →
+  // сообщение (the structured application flow).
   const steps: string[] = isInvite
     ? (invitePickSpecialist ? ['event', 'role', 'specialist', 'message'] : ['event', 'role', 'message'])
-    : ['role', 'message'];
+    : isSend
+      ? ['request', 'role', 'message']
+      : ['role', 'message'];
   const stepTitles: Record<string, string> = {
     event: t('smmStepEvent'),
     role: t('smmStepRole'),
     specialist: t('smmStepSpecialist'),
+    request: t('smmPickRequest'),
     message: t('smmStepMessage'),
   };
   // Review cards — every earlier choice as its own swipeable card
   const reviewCards: string[] = [
     ...(isInvite ? ['event'] : []),
+    ...(isSend ? ['request'] : []),
     'role',
     'message',
     isInvite ? 'specialist' : 'customer',
@@ -90,6 +101,7 @@ export default function SmmWizardView({ goHome, onConfirm, onCreateEvent }: SmmW
     if (key === 'event') return !!selEventId;
     if (key === 'role') return !!selRoleId;
     if (key === 'specialist') return !!wizardSpecialist;
+    if (key === 'request') return !!selRequestId;
     return true;
   })();
 
@@ -200,6 +212,39 @@ export default function SmmWizardView({ goHome, onConfirm, onCreateEvent }: SmmW
         </Card>
       );
     }
+    if (key === 'request') {
+      // SEND flow: one of MY запросы is picked (or created right here)
+      return (
+        <Card className="border-0 shadow-lg">
+          <CardContent className="p-5">
+            {slideHead(<ListOrdered className="w-7 h-7 text-white" />, t('smmPickRequest'), t('smmPickRequestHint'))}
+            {wizardRequests.length === 0 ? (
+              <div className="text-center space-y-3 py-4">
+                <p className="text-sm text-muted-foreground">{t('smmNoRequestsYet')}</p>
+                <p className="text-xs text-muted-foreground">{t('smmNoRequestsHint')}</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[46vh] overflow-y-auto">
+                {wizardRequests.map(rq => {
+                  const stps: any[] = rq.steps || [];
+                  const filled = stps.filter((s: any) => (s.answer || '').trim()).length;
+                  return (
+                    <button key={rq.id} type="button" onClick={() => setSelRequestId(rq.id)} className={rowCls(selRequestId === rq.id)}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm flex-1 min-w-0 truncate">{rq.title}</span>
+                        {selRequestId === rq.id && <CheckCircle2 className="w-4 h-4 text-cta shrink-0" />}
+                      </div>
+                      {rq.summary && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{rq.summary}</p>}
+                      <p className="text-[11px] text-muted-foreground mt-1">{t('smmStepsN', { n: stps.length })} · {t('smmFilledN', { n: filled, m: stps.length })}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      );
+    }
     // message — «Дополнительные настройки»: the unique ТЗ / application text
     return (
       <Card className="border-0 shadow-lg">
@@ -266,6 +311,25 @@ export default function SmmWizardView({ goHome, onConfirm, onCreateEvent }: SmmW
             : <p className="text-sm text-muted-foreground">{t('smmNoCustomMessage')}</p>}
         </>
       );
+    } else if (key === 'request') {
+      const stps: any[] = selRequest?.steps || [];
+      body = selRequest ? (
+        <>
+          {chip(<ListOrdered className="w-3.5 h-3.5" />, t('smmPickRequest'))}
+          <CardTitle className="text-lg">{selRequest.title}</CardTitle>
+          {selRequest.summary && <CardDescription className="mt-2 line-clamp-3">{selRequest.summary}</CardDescription>}
+          {stps.length > 0 && (
+            <div className="mt-3 space-y-1">
+              {stps.map((s: any, i: number) => (
+                <div key={s.id} className="flex items-center gap-1.5 text-xs">
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${(s.answer || '').trim() ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground'}`}>{i + 1}</span>
+                  <span className="font-semibold truncate">{s.title}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : null;
     } else {
       body = person ? (
         <>
@@ -293,7 +357,7 @@ export default function SmmWizardView({ goHome, onConfirm, onCreateEvent }: SmmW
         {/* FIXED h-14 — the uniform 56px top-panel contract */}
         <div className="max-w-2xl lg:max-w-3xl mx-auto px-4 h-14 lg:h-16 flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={goHome} className="rounded-full"><ArrowLeft className="w-4 h-4 mr-1" /> {t('back')}</Button>
-          <h1 className="text-lg font-bold truncate">{isInvite ? t('smmInviteTitle') : t('smmApplyTitle')}</h1>
+          <h1 className="text-lg font-bold truncate">{isInvite ? t('smmInviteTitle') : isSend ? t('smmSendRequestBtn') : t('smmApplyTitle')}</h1>
         </div>
       </header>
 
@@ -351,10 +415,10 @@ export default function SmmWizardView({ goHome, onConfirm, onCreateEvent }: SmmW
           {inReview ? (
             <Button
               onClick={onConfirm}
-              disabled={wizardBusy || !selRoleId || (isInvite && !selEventId)}
+              disabled={wizardBusy || !selRoleId || (isInvite && !selEventId) || (isSend && !selRequestId)}
               className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-primary hover:bg-primary/90"
             >
-              {wizardBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-2" /> {isInvite ? t('smmConfirmInvite') : t('smmConfirmApply')}</>}
+              {wizardBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-2" /> {isInvite ? t('smmConfirmInvite') : isSend ? t('smmConfirmSendRequest') : t('smmConfirmApply')}</>}
             </Button>
           ) : (
             <Button

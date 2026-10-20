@@ -62,6 +62,11 @@ model User {
   smmInvitationsReceived SmmInvitation[] @relation("SmmInvitationSpecialist")
   smmApplications        SmmApplication[] @relation("SmmApplicationSpecialist")
   smmChatMessages        SmmChatMessage[]
+  // Запросы — the specialist's structured proposals (created with «+»,
+  // edited with «изменить», filled step-by-step, sent to events)
+  smmRequests            SmmRequest[]    @relation("SmmRequestSpecialist")
+  // Public role task templates («Общие роли») authored by this user
+  smmRoleTemplates       SmmRole[]       @relation("SmmRoleAuthor")
 }
 
 // Opaque session token → user. The phone stores ONLY the token cookie
@@ -163,21 +168,67 @@ model SmmEvent {
 }
 
 // Роль в мероприятии — the customer's reusable ТЗ template. Specialists
-// apply (or are invited) for a concrete role.
+// apply (or are invited) for a concrete role. A role can also live WITHOUT
+// an event as a PUBLIC TASK TEMPLATE («Общие роли»): eventId = null,
+// isPublic = true, authorId = the sharing user.
 model SmmRole {
   id       String   @id @default(cuid())
-  eventId  String
-  event    SmmEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventId  String?
+  event    SmmEvent? @relation(fields: [eventId], references: [id], onDelete: Cascade)
   name     String
   brief    String   @default("") // ТЗ роли — the template text
   payment  String   @default("")
   deadline String   @default("")
   orderNum Int      @default(0)
+  // Public template flag («Общие роли» — people share task templates)
+  isPublic Boolean  @default(false)
+  // Template author (null for the roles created inside an event)
+  authorId String?
+  author   User?    @relation("SmmRoleAuthor", fields: [authorId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   invitations SmmInvitation[]
   applications SmmApplication[]
 
   @@index([eventId, orderNum])
+  @@index([isPublic, createdAt])
+  @@index([authorId])
+}
+
+// ЗАПРОС — the specialist's structured proposal: created with «+» (the test
+// editor's twin), edited with «изменить», FILLED step-by-step on the
+// test-taking twin page (each step = a card), then SENT to an event's role
+// (the SmmApplication carries the requestId). isPublic = shared to the
+// general library where other users browse the templates.
+model SmmRequest {
+  id           String   @id @default(cuid())
+  specialistId String
+  specialist   User     @relation("SmmRequestSpecialist", fields: [specialistId], references: [id], onDelete: Cascade)
+  title        String
+  summary      String   @default("") // краткое описание для карточки
+  coverColor   String?
+  coverIcon    String?
+  isPublic     Boolean  @default(false)
+  steps        SmmRequestStep[]
+  applications SmmApplication[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([specialistId, createdAt])
+  @@index([isPublic, createdAt, id])
+}
+
+// Шаг запроса — one card on the filling screen (the question-card twin):
+// the title + hint describe WHAT to do, the answer is the specialist's text.
+model SmmRequestStep {
+  id        String @id @default(cuid())
+  requestId String
+  request   SmmRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  title     String
+  hint      String @default("")
+  answer    String @default("") // the specialist's filled content
+  orderNum  Int    @default(0)
+
+  @@index([requestId, orderNum])
 }
 
 // Приглашение: the CUSTOMER invites a SPECIALIST to an event role
@@ -214,6 +265,11 @@ model SmmApplication {
   role         SmmRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
   specialistId String
   specialist   User     @relation("SmmApplicationSpecialist", fields: [specialistId], references: [id], onDelete: Cascade)
+  // Optional structured запрос: when the specialist sends one of their
+  // SmmRequest documents, the link lands here (the «Отправленные запросы»
+  // page shows the запрос's steps and the customer sees the full structure).
+  requestId    String?
+  request      SmmRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
   message      String   @default("")
   status       String   @default("pending") // pending | accepted | declined
   createdAt    DateTime @default(now())

@@ -302,7 +302,9 @@ export const smmEventUpdateSchema = smmEventCreateSchema.partial().extend({
   status: z.enum(["open", "closed"]).optional(),
 });
 
-export const smmRoleUpdateSchema = smmRoleInputSchema.partial();
+export const smmRoleUpdateSchema = smmRoleInputSchema.partial().extend({
+  isPublic: z.boolean().optional(),
+});
 
 export const smmInvitationCreateSchema = z.object({
   eventId: z.string().min(1).max(64),
@@ -317,6 +319,8 @@ export const smmApplicationCreateSchema = z.object({
   roleId: z.string().min(1).max(64),
   // Уникальный текст заявки из «Дополнительных настроек»
   message: z.string().max(8000).optional(),
+  // The structured запрос the specialist sends with this application
+  requestId: z.string().min(1).max(64).optional(),
 });
 
 export const smmRespondSchema = z.object({
@@ -324,8 +328,50 @@ export const smmRespondSchema = z.object({
 });
 
 export const smmBookmarkSchema = z.object({
-  targetType: z.enum(["specialist", "event"]),
+  targetType: z.enum(["specialist", "event", "request", "role"]),
   targetId: z.string().min(1).max(64),
+});
+
+// ── ЗАПРОСЫ — the specialist's structured proposals ──────────────────────
+export const smmRequestStepInputSchema = z.object({
+  title: z.string().max(200).optional(),
+  hint: z.string().max(2000).optional(),
+  answer: z.string().max(20000).optional(),
+});
+
+export const smmRequestCreateSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  summary: z.string().max(1000).optional(),
+  coverColor: z.string().max(40).nullish(),
+  coverIcon: z.string().max(40).nullish(),
+  isPublic: z.boolean().optional(),
+  steps: z.array(smmRequestStepInputSchema).max(60).optional(),
+});
+
+export const smmRequestUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  summary: z.string().max(1000).optional(),
+  coverColor: z.string().max(40).nullish(),
+  coverIcon: z.string().max(40).nullish(),
+  isPublic: z.boolean().optional(),
+  steps: z.array(smmRequestStepInputSchema).max(60).optional(),
+});
+
+export const smmRequestShareSchema = z.object({
+  scope: z.enum(["link", "community"]).optional().catch("link" as const),
+});
+
+// Standalone public role template («Общие роли») + attaching one to my event
+export const smmRoleTemplateCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  brief: z.string().max(8000).optional(),
+  payment: z.string().max(120).optional(),
+  deadline: z.string().max(120).optional(),
+  isPublic: z.boolean().optional(),
+});
+
+export const smmRoleAttachSchema = z.object({
+  eventId: z.string().min(1).max(64),
 });
 
 export const smmFileCreateSchema = z.object({
@@ -345,7 +391,10 @@ export const smmChatSendSchema = z.object({
 });
 
 export const smmAiChatSchema = z.object({
-  specialistId: z.string().min(1).max(64),
+  specialistId: z.string().min(1).max(64).optional(),
+  eventId: z.string().min(1).max(64).optional(),
+  requestId: z.string().min(1).max(64).optional(),
+  roleId: z.string().min(1).max(64).optional(),
   messages: z
     .array(
       z.object({

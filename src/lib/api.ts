@@ -256,22 +256,50 @@ export const api = {
   respondSmmInvitation: (id: string, action: 'accept' | 'decline') =>
     apiFetch(`/smm/invitations/${id}/respond`, { method: 'POST', body: JSON.stringify({ action }) }),
   getSmmApplications: (box: 'inbox' | 'sent') => apiFetch(`/smm/applications?box=${box}`) as Promise<any[]>,
-  createSmmApplication: (data: { eventId: string; roleId: string; message?: string }) =>
+  createSmmApplication: (data: { eventId: string; roleId: string; message?: string; requestId?: string }) =>
     apiFetch('/smm/applications', { method: 'POST', body: JSON.stringify(data) }),
   respondSmmApplication: (id: string, action: 'accept' | 'decline') =>
     apiFetch(`/smm/applications/${id}/respond`, { method: 'POST', body: JSON.stringify({ action }) }),
-  getSmmBookmarks: (targetType?: 'specialist' | 'event') =>
+  // ─── ЗАПРОСЫ — the specialist's structured proposals ─────────────────
+  // box=mine → my запросы; box=public → the shared templates library
+  getSmmRequests: (box: 'mine' | 'public') => apiFetch(`/smm/requests?box=${box}`) as Promise<any[]>,
+  getSmmRequest: (id: string) => apiFetch(`/smm/requests/${id}`) as Promise<any>,
+  createSmmRequest: (data: { title: string; summary?: string; coverColor?: string | null; coverIcon?: string | null; isPublic?: boolean; steps?: { title?: string; hint?: string; answer?: string }[] }) =>
+    apiFetch('/smm/requests', { method: 'POST', body: JSON.stringify(data) }),
+  updateSmmRequest: (id: string, data: { title?: string; summary?: string; coverColor?: string | null; coverIcon?: string | null; isPublic?: boolean; steps?: { title?: string; hint?: string; answer?: string }[] }) =>
+    apiFetch(`/smm/requests/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSmmRequest: (id: string) => apiFetch(`/smm/requests/${id}`, { method: 'DELETE' }),
+  shareSmmRequest: (id: string, scope: 'link' | 'community') =>
+    apiFetch(`/smm/requests/${id}/share`, { method: 'POST', body: JSON.stringify({ scope }) }) as Promise<{ ok: boolean; isPublic: boolean }>,
+  // ─── ОБЩИЕ РОЛИ — public role task templates ───────────────────────
+  getSmmRoles: (box: 'mine' | 'public') => apiFetch(`/smm/roles?box=${box}`) as Promise<any[]>,
+  createSmmRoleTemplate: (data: { name: string; brief?: string; payment?: string; deadline?: string; isPublic?: boolean }) =>
+    apiFetch('/smm/roles', { method: 'POST', body: JSON.stringify(data) }),
+  attachSmmRoleTemplate: (roleId: string, eventId: string) =>
+    apiFetch(`/smm/roles/${roleId}/attach`, { method: 'POST', body: JSON.stringify({ eventId }) }),
+  getSmmBookmarks: (targetType?: 'specialist' | 'event' | 'request' | 'role') =>
     apiFetch(`/smm/bookmarks${targetType ? `?targetType=${targetType}` : ''}`) as Promise<{ ids: string[]; pairs: { targetType: string; targetId: string }[] }>,
-  addSmmBookmark: (targetType: 'specialist' | 'event', targetId: string) =>
+  addSmmBookmark: (targetType: 'specialist' | 'event' | 'request' | 'role', targetId: string) =>
     apiFetch('/smm/bookmarks', { method: 'POST', body: JSON.stringify({ targetType, targetId }) }),
-  removeSmmBookmark: (targetType: 'specialist' | 'event', targetId: string) =>
+  removeSmmBookmark: (targetType: 'specialist' | 'event' | 'request' | 'role', targetId: string) =>
     apiFetch(`/smm/bookmarks?targetType=${targetType}&targetId=${encodeURIComponent(targetId)}`, { method: 'DELETE' }),
   // SMM group chat (about an event / a specialist)
   getSmmMessages: (scopeType: 'event' | 'specialist', scopeId: string, after?: string) =>
     apiFetch(`/smm/chat?scopeType=${scopeType}&scopeId=${encodeURIComponent(scopeId)}${after ? `&after=${encodeURIComponent(after)}` : ''}`),
   sendSmmMessage: (scopeType: 'event' | 'specialist', scopeId: string, text: string) =>
     apiFetch('/smm/chat', { method: 'POST', body: JSON.stringify({ scopeType, scopeId, text }) }),
-  // AI chat about a SPECIALIST (the customer's research window)
+  // AI chat about a SPECIALIST (the customer's research window) or an EVENT
+  // (the «ИИ чат» card button — the event's brief, roles, money)
   chatAboutSpecialist: (specialistId: string, messages: { role: 'user' | 'assistant'; content: string }[]) =>
     apiFetch('/smm/ai-chat', { method: 'POST', body: JSON.stringify({ specialistId, messages }) }) as Promise<{ response?: string; rateLimited?: boolean; error?: string }>,
+  chatAboutEvent: (eventId: string, messages: { role: 'user' | 'assistant'; content: string }[]) =>
+    apiFetch('/smm/ai-chat', { method: 'POST', body: JSON.stringify({ eventId, messages }) }) as Promise<{ response?: string; rateLimited?: boolean; error?: string }>,
+  chatAboutRequest: (requestId: string, messages: { role: 'user' | 'assistant'; content: string }[]) =>
+    apiFetch('/smm/ai-chat', { method: 'POST', body: JSON.stringify({ requestId, messages }) }) as Promise<{ response?: string; rateLimited?: boolean; error?: string }>,
+  chatAboutRole: (roleId: string, messages: { role: 'user' | 'assistant'; content: string }[]) =>
+    apiFetch('/smm/ai-chat', { method: 'POST', body: JSON.stringify({ roleId, messages }) }) as Promise<{ response?: string; rateLimited?: boolean; error?: string }>,
+  // Account switcher (заказчик ↔ SMM-специалист) — the top-panel button that
+  // cycles the account kind like the language button cycles languages
+  switchSmmRole: (smmRole: 'customer' | 'specialist') =>
+    apiFetch('/smm/profile', { method: 'PUT', body: JSON.stringify({ smmRole }) }),
 };
