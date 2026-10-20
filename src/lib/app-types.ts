@@ -7,7 +7,7 @@
 // 'guest-boot' — the anonymous share-link landing: the visitor opened
 // ?test=<id> without a session; the app boots that one test into the taking
 // screen while this splash is up. Guests can reach NOTHING else.
-export type Page = 'auth' | 'dashboard' | 'create-test' | 'edit-test' | 'start-test' | 'take-test' | 'history' | 'profile' | 'guest-boot';
+export type Page = 'auth' | 'dashboard' | 'create-test' | 'edit-test' | 'start-test' | 'take-test' | 'history' | 'profile' | 'guest-boot' | 'smm-event-editor' | 'smm-post-editor' | 'smm-apply' | 'smm-invite';
 
 export interface Question {
   id?: string;
@@ -141,4 +141,115 @@ export interface Attempt {
   startedAt: string;
   completedAt?: string;
   test?: { id: string; title: string; topic: string };
+}
+
+// ── SMM MODES (the second bottom panel) ────────────────────────────────────
+
+// One media entry of a post: tg:/data:/https: URL (served like attachments)
+export interface SmmPostMedia {
+  url: string;
+  type: 'video' | 'image';
+  title?: string;
+}
+
+// ПОСТ — the specialist's card about their work for ONE role
+export interface SmmPostT {
+  id: string;
+  specialistId: string;
+  roleId: string;
+  description: string;
+  media?: SmmPostMedia[] | null;
+  coverColor?: string | null;
+  coverIcon?: string | null;
+  createdAt: string;
+  role?: { id: string; name: string; pricePerK?: number | null; pricePerDay?: number | null } | null;
+  specialist?: { id: string; name: string; image?: string | null } | null;
+}
+
+// МЕРОПРИЯТИЕ — the customer's event: the 4 facts instead of questions
+export interface SmmEventT {
+  id: string;
+  customerId: string;
+  title: string;
+  summary: string;
+  brief?: string;
+  format: 'online' | 'offline';
+  platform: string;
+  location: string;
+  timeAt: string;
+  testIds: string[];
+  coverColor?: string | null;
+  coverIcon?: string | null;
+  isPublic: boolean;
+  createdAt: string;
+  customer?: { id: string; name: string; image?: string | null } | null;
+  tests?: { id: string; title: string; _count?: { questions: number } }[];
+}
+
+// РОЛЬ специалиста — the price list line on their card
+export interface SmmRoleT {
+  id: string;
+  name: string;
+  pricePerK?: number | null;
+  pricePerDay?: number | null;
+  ownerId?: string | null;
+  createdAt?: string;
+}
+
+// КАРТОЧКА СПЕЦИАЛИСТА (the customer's публичная библиотека)
+export interface SmmSpecialistT {
+  id: string;
+  name: string;
+  image?: string | null;
+  rating: number;
+  orders: number;
+  roles: SmmRoleT[];
+}
+
+// A row of «Мои запросы»: a sent заявка or приглашение
+export interface SmmRequestRowT {
+  id: string;
+  kind: 'application' | 'invitation';
+  status: string;
+  createdAt: string;
+  score?: number;
+  totalQuestions?: number;
+  estimate?: number | null;
+  eventId: string;
+  eventTitle: string;
+  roleId: string;
+  roleName: string;
+  counterpartyName: string;
+}
+
+// A row of the закладки window
+export interface SmmBookmarkRowT {
+  id: string;
+  targetType: 'event' | 'specialist' | 'post';
+  targetId: string;
+  createdAt: string;
+  event?: SmmEventT | null;
+  specialist?: SmmSpecialistT | null;
+  post?: SmmPostT | null;
+}
+
+// A chat card + a message
+export interface SmmChatT {
+  id: string;
+  kind: 'group' | 'direct';
+  title: string;
+  ownerId?: string | null;
+  lastMessageAt: string;
+  lastMessage?: string | null;
+  peer?: { id: string; name: string; image?: string | null } | null;
+}
+
+export interface SmmChatMessageT {
+  id: string;
+  chatId: string;
+  userId: string;
+  userName: string;
+  text: string;
+  kind?: 'text' | 'system';
+  createdAt: string;
 }

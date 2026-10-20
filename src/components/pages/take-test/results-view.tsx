@@ -9,11 +9,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { trOption, trText, tUI } from '@/lib/i18n';
-import { ArrowLeft, LayoutGrid, MessageSquare, Paperclip, Pencil, Play, RefreshCw, Rows3, Search, Users } from 'lucide-react';
+import { ArrowLeft, LayoutGrid, MessageSquare, Paperclip, Pencil, Play, RefreshCw, Rows3, Search, ShieldCheck, Users } from 'lucide-react';
 import { testBackgroundCss } from '@/lib/test-bg';
 import { TranslatingPill } from '@/components/shared-bits';
 import MathText from '@/components/math-text';
 import { useTakeStore } from '@/stores/take-store';
+import { useSmmStore } from '@/stores/smm-store';
 import { useNavStore } from '@/stores/nav-store';
 import { useDashboardStore } from '@/stores/dashboard-store';
 import { useSessionStore } from '@/stores/session-store';
@@ -78,6 +79,58 @@ export function ResultsView({
 
   const score = shuffledQuestions.filter(q => answers[q.id || ''] === q.correctAnswer).length;
   const pct = Math.round((score / shuffledQuestions.length) * 100);
+
+  // ── SMM ЗАЯВКА MODE — the compact results screen: the score card + the
+  // «правильные ответы не показываются» note; NO review list, NO AI/chat/
+  // edit windows — only the top panel and the bottom bar (the apply page
+  // collects the scores of every test of the event, then confirms).
+  const smmHideAnswers = useTakeStore(s => s.smmHideAnswers);
+  const curSmmTestId = currentTest?.id || null;
+  React.useEffect(() => {
+    if (!smmHideAnswers || !curSmmTestId) return;
+    useSmmStore.setState((s: any) => ({
+      applyResults: { ...s.applyResults, [curSmmTestId]: { score, total: shuffledQuestions.length } },
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [smmHideAnswers, curSmmTestId, score, shuffledQuestions.length]);
+  if (smmHideAnswers) {
+    return (
+      <div className="min-h-screen bg-background screen-enter flex flex-col" style={myBgStyle ? { background: testBackgroundCss(myBgStyle) } : undefined}>
+        <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b">
+          <div className="max-w-7xl mx-auto px-2 sm:px-4 h-14 lg:h-16 flex flex-nowrap items-center justify-between gap-1 sm:gap-2">
+            <div className="flex items-center gap-1 min-w-0 shrink">
+              <Button variant="ghost" size="sm" onClick={goHome} className="rounded-full shrink-0 h-8 w-8 p-0 sm:w-auto sm:px-3"><ArrowLeft className="w-4 h-4 sm:mr-1" /> <span className="hidden sm:inline">{t('back')}</span></Button>
+              <h1 className="text-base sm:text-lg font-bold truncate">{t('testResults')}</h1>
+            </div>
+            <LangButton lang={lang} onChange={cycleLang} className="border-black px-1.5 sm:px-3 shrink-0" />
+          </div>
+        </header>
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 pt-8 pb-40">
+          <Card className="rounded-4xl border border-black bg-white overflow-hidden max-w-xl mx-auto">
+            <div className={`h-2 ${pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} />
+            <CardContent className="p-8 text-center">
+              <div className={`w-24 h-24 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl font-bold text-white ${
+                pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-500'
+              }`}>
+                {pct}%
+              </div>
+              <h2 className="text-2xl font-bold mb-1">{score} / {shuffledQuestions.length}</h2>
+              <p className="text-sm text-muted-foreground mt-3 flex items-center justify-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 shrink-0" /> {t('smmResultHidden')}
+              </p>
+            </CardContent>
+          </Card>
+        </main>
+        <div className="desktop-dock fixed inset-x-0 bottom-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
+          <div className="max-w-7xl mx-auto px-4 pt-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <Button onClick={goHome} className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-primary hover:bg-primary/90">
+              {t('smmApplyTestDone')} — {t('back')}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Results header search: filter the review questions by text or option
   // content; selecting a result scrolls to that question card and highlights it.

@@ -135,6 +135,11 @@ import HistoryView from '@/components/pages/history-view';
 import StartTestView from '@/components/pages/start-test-view';
 import TakeTestView from '@/components/pages/take-test-view';
 import DashboardView from '@/components/pages/dashboard-view';
+// SMM MODES — the mode-switcher marketplace built on the tests site
+import SmmDashboard from '@/components/pages/smm-view';
+import { SmmEventEditor, SmmPostEditor } from '@/components/pages/smm-editors';
+import { SmmApplyView, SmmInviteView } from '@/components/pages/smm-flows';
+import { useSmmStore } from '@/stores/smm-store';
 import type { FeedApi } from '@/components/pages/dashboard-view';
 import CreateEditView from '@/components/pages/create-edit-view';
 import LangButton from '@/components/lang-button';
@@ -697,6 +702,11 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
       }
       setUser(me); // in-memory session cache only
       setHydratedUser(me);
+      // SMM mode: the second bottom panel starts from the persisted account
+      // mode (User.smmRole) — the switcher just updates it.
+      if (me.smmRole === 'specialist' || me.smmRole === 'customer') {
+        useSmmStore.setState({ smmMode: me.smmRole });
+      }
       // Interface language: DB first (User.lang), then the pre-DB device
       // choice (one-time migration), then browser detection. The picked
       // language is PERSISTED TO THE DB, never to the device.
@@ -3924,55 +3934,13 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     else if (key === 'group') { setEditOpen(false); setDashFilesOpen(false); openCardGroupChat(t0); }
   } };
 
-  // DASHBOARD (view extracted to src/components/pages/dashboard-view.tsx)
+  // DASHBOARD (the SMM mode-switcher dashboard: посты / мероприятия /
+  // специалисты + the закладки/чаты/запросы windows + the second bottom panel.
+  // The tests dashboard below stays as the guest-boot fallback.)
   if (effectivePage === 'dashboard') {
     return (
       <>
-        <DashboardView
-          tests={tests}
-          bookmarkIds={bookmarkIds}
-          loading={loading}
-          feedLoading={feedLoading}
-          viewingLoading={viewingLoading}
-          fileSlides={fileSlides}
-          dashFeedRef={dashFeedRef}
-          feedApiRef={feedApiRef}
-          feedSentinelRef={feedSentinelRef}
-          onDashCommit={onDashCommit}
-          jumpToTest={jumpToTest}
-          closeUserLibrary={closeUserLibrary}
-          closeGridFiles={closeGridFiles}
-          closeFilesCard={closeFilesCard}
-          backToLibrary={backToLibrary}
-          startCreateTest={startCreateTest}
-          startEditTest={startEditTest}
-          openFromLibrary={openFromLibrary}
-          toggleBookmark={toggleBookmark}
-          openUserLibrary={openUserLibrary}
-          startFromDashboard={startFromDashboard}
-          toggleGridFiles={toggleGridFiles}
-          openTreeCard={openTreeCard}
-          closeTreeCard={closeTreeCard}
-          toggleGridTree={toggleGridTree}
-          closeGridTree={closeGridTree}
-          openAiDiscuss={openAiDiscuss}
-          openCardFiles={openCardFiles}
-          openCardGroupChat={openCardGroupChat}
-          doShareLink={doShareLink}
-          doMakePublic={doMakePublic}
-          handleDeleteTest={handleDeleteTest}
-          exitFilesMode={exitFilesMode}
-          openFilesCard={openFilesCard}
-          cycleDashView={cycleDashView}
-          toggleDiscoverMode={toggleDiscoverMode}
-        />
-        {/* THE DASHBOARD AI WINDOW — «Обсудить с ИИ»: opens STRAIGHT INTO the
-        conversation (the test's most recent thread, or a fresh one); the AI
-        holds the WHOLE test context. The replacement of the version-tree
-        entry on every library/shelf/feed card.
-        Docked to the RIGHT edge on desktop (the AI chat lives in the right
-        panel, like on the taking screen); the mobile variant brings its own
-        fixed bottom-sheet overlay, the wrapper stays gesture-transparent. */}
+        <SmmDashboard />
         {aiCardTestId && (
           <div className="fixed inset-0 z-50 flex items-center justify-end lg:p-5 pointer-events-none">
             <div className="pointer-events-auto max-h-full">
@@ -4001,106 +3969,7 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
             </div>
           </div>
         )}
-        {/* THE DASHBOARD FILES WINDOW — «Файлы» from a card: the SAME window
-        format as the AI window — right-docked panel on desktop (the same
-        fixed wrapper), resizable bottom sheet on mobile. The header wears
-        the title + the test's name; the body lists the attachments. */}
-        {dashFiles && (
-          <AttachmentsBottomSheet
-            items={dashFiles.items}
-            open={dashFilesOpen}
-            onOpenChange={v => { if (!v) closeCardFiles(); }}
-            hideLauncher
-            title={t('attachedFiles', { n: dashFiles.items.length })}
-            subtitle={dashFiles.title}
-            switcher={dashSwitcher}
-          />
-        )}
-        {dashFiles && dashFilesSideMounted && (
-          <div className="hidden lg:flex fixed inset-0 z-50 items-center justify-end p-5 pointer-events-none">
-            <div className="pointer-events-auto">
-              <AttachmentsSidePanel
-                items={dashFiles.items}
-                onClose={closeCardFiles}
-                title={t('attachedFiles', { n: dashFiles.items.length })}
-                subtitle={dashFiles.title}
-                switcher={dashSwitcher}
-              />
-            </div>
-          </div>
-        )}
-        {/* THE DASHBOARD GROUP CHAT WINDOW — «Чат» from a card: the SAME
-        window format as the files window — right-docked panel on desktop
-        (the same fixed wrapper the AI window wears), resizable bottom sheet
-        on mobile (MobileChatSheet brings its own fixed overlay). Everyone's
-        chat about THIS test; the poll keeps it live without WebSockets. */}
-        {dashGroupTestId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-end lg:p-5 pointer-events-none">
-            <div className="pointer-events-auto max-h-full">
-              <GroupChatPanel
-                open
-                onClose={closeCardGroupChat}
-                title={t('chat')}
-                subtitle={dashGroupTitleRef.current}
-                messages={groupMessages}
-                currentUserId={user?.id}
-                input={groupInput}
-                onInputChange={setGroupInput}
-                onSend={sendDashGroupMessage}
-                sending={groupSending}
-                endRef={groupEndRef}
-                inputPlaceholder={t('messageGroup')}
-                onOpenProfile={openUserLibrary}
-                openProfileLabel={t('openProfile')}
-                switcher={dashSwitcher}
-              />
-            </div>
-          </div>
-        )}
-        {/* THE DASHBOARD EDIT WINDOW — «Редактировать» from a card opens the
-        SAME window the taking screen uses (resizable bottom sheet on mobile,
-        centered dialog on desktop, header switcher, Save) instead of the
-        full-page editor. */}
-        {editOpen && !!editingTestId && (
-          <ResizableSheetFrame
-            open={editOpen}
-            onClose={() => setEditOpen(false)}
-            initialVh={0.85}
-            minVh={0.4}
-            maxW="max-w-3xl"
-            header={
-              <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
-                <SheetHeaderSwitcher
-                  icon={<Pencil className="w-4 h-4 text-white" />}
-                  title={t('editTest')}
-                  subtitle={currentTest?.title}
-                  options={dashSwitcher.options}
-                  onSelect={dashSwitcher.onSelect}
-                />
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => setEditOpen(false)}>
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            }
-            body={
-              <div className="px-4 py-4">
-                <div className="max-w-3xl mx-auto space-y-6">
-                  {editorBody}
-                </div>
-              </div>
-            }
-            footer={
-              <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-4 pt-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
-                <Button onClick={() => handleSaveTest(false, true)} disabled={loading} className="w-full rounded-full bg-primary hover:bg-primary/90">
-                  {loading ? t('saving') : t('saveTest')}
-                </Button>
-              </div>
-            }
-          />
-        )}
-        {/* Blocked trivial copy → the rule dialog (dashboard path) */}
         <GateDialog test={gateDialogTest} onClose={() => setGateDialogTest(null)} />
-        {/* Version naming sheet — fires from the first share-by-link on a card */}
         <VersionNameSheet
           open={versionNameGate !== null}
           mode={versionNameGate?.mode || 'share'}
@@ -4164,7 +4033,11 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
     return (
       <>
         <TakeTestView
-          goHome={() => { if (isGuestNow()) return wall('home'); goHome(); }}
+          goHome={() => {
+            // The заявка flow: the results screen returns to the apply page
+            if (useSmmStore.getState().applyCtx) { setPage('smm-apply'); return; }
+            if (isGuestNow()) return wall('home'); goHome();
+          }}
           openChat={(questionId, userAnswer, opts) => { if (isGuestNow()) return wall('chat'); openChat(questionId, userAnswer, opts); }}
           closeChat={closeChat}
           openGroupChat={() => { if (isGuestNow()) return wall('chat'); openGroupChat(); }}
@@ -4222,6 +4095,20 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
   // HISTORY (view extracted to src/components/pages/history-view.tsx)
   if (effectivePage === 'history') {
     return <HistoryView goHome={goHome} />;
+  }
+
+  // ── SMM PAGES — the editors + the заявка/приглашение flows ────────────────
+  if (effectivePage === 'smm-event-editor') {
+    return <SmmEventEditor />;
+  }
+  if (effectivePage === 'smm-post-editor') {
+    return <SmmPostEditor />;
+  }
+  if (effectivePage === 'smm-apply') {
+    return <SmmApplyView />;
+  }
+  if (effectivePage === 'smm-invite') {
+    return <SmmInviteView />;
   }
 
   return null;

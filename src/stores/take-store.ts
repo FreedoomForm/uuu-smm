@@ -19,6 +19,9 @@ interface TakeData {
   currentQuestionIdx: number;
   answers: Record<string, string>;
   showResult: boolean;
+  // SMM заявка flow: the results screen hides correct answers and returns
+  // to the apply page instead of the dashboard
+  smmHideAnswers: boolean;
   // Randomization chosen at test START (Start Test page / dashboard cards),
   // not in the editor
   startRandomizeQ: boolean;
@@ -53,6 +56,7 @@ const INITIAL: TakeData = {
   currentQuestionIdx: 0,
   answers: {},
   showResult: false,
+  smmHideAnswers: false,
   startRandomizeQ: true,
   startRandomizeO: true,
   selectedQuestionCount: 0,

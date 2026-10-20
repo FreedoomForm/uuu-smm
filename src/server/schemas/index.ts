@@ -248,6 +248,8 @@ export const profileUpdateSchema = z.object({
   name: z.string().max(120).optional(),
   bgStyle: z.string().max(120).optional(),
   lang: z.enum(["en", "ru", "uz"]).optional(),
+  // The SMM mode switcher (the second bottom panel): persisted per account
+  smmRole: z.enum(["specialist", "customer"]).optional(),
 });
 
 export const interestsSchema = z.object({

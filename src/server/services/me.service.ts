@@ -19,7 +19,7 @@ import { collectUserChannelFiles } from "./telegram-cleanup";
 export async function getProfile(userId: string) {
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true, bgStyle: true, lang: true, image: true },
+    select: { id: true, email: true, name: true, bgStyle: true, lang: true, image: true, smmRole: true, smmRating: true },
   });
   if (!user) throw ApiError.notFound("User not found");
   return user;
@@ -27,9 +27,9 @@ export async function getProfile(userId: string) {
 
 export async function updateProfile(
   userId: string,
-  body: { name?: string; bgStyle?: string; lang?: string }
+  body: { name?: string; bgStyle?: string; lang?: string; smmRole?: string }
 ) {
-  const data: { name?: string; bgStyle?: string; lang?: string } = {};
+  const data: { name?: string; bgStyle?: string; lang?: string; smmRole?: string } = {};
 
   if (typeof body.name === "string") {
     const name = body.name.trim();
@@ -49,6 +49,10 @@ export async function updateProfile(
     }
     data.lang = body.lang;
   }
+  if (body.smmRole === "specialist" || body.smmRole === "customer") {
+    // The SMM mode switcher (the second bottom panel) — persisted per account
+    data.smmRole = body.smmRole;
+  }
 
   if (Object.keys(data).length === 0) {
     throw ApiError.badRequest("Nothing to update");
@@ -57,7 +61,7 @@ export async function updateProfile(
   return db.user.update({
     where: { id: userId },
     data,
-    select: { id: true, email: true, name: true, bgStyle: true, lang: true },
+    select: { id: true, email: true, name: true, bgStyle: true, lang: true, smmRole: true, smmRating: true },
   });
 }
 

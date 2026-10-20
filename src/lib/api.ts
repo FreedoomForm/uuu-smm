@@ -51,7 +51,7 @@ export const api = {
   // "Who am I?" — resolves the session cookie against the database.
   // Returns null (instead of throwing) for visitors without a live session.
   getSession: async (): Promise<{
-    id: string; email: string; name: string; lang?: string; bgStyle?: string; image?: string | null;
+    id: string; email: string; name: string; lang?: string; bgStyle?: string; image?: string | null; smmRole?: string; smmRating?: number;
   } | null> => {
     try {
       return await apiFetch('/me');
@@ -218,4 +218,73 @@ export const api = {
   // Persist on-the-fly question translations (machine-translated in the browser)
   saveTranslations: (testId: string, lang: string, items: { id: string; text?: string; options?: Record<string, string>; explanation?: string }[]) =>
     apiFetch(`/tests/${testId}/translations`, { method: 'POST', body: JSON.stringify({ lang, items }) }),
+
+  // ── SMM MODES (the second bottom panel) ────────────────────────────────
+  // Switch the account mode (persisted in User.smmRole)
+  setSmmMode: (smmMode: 'specialist' | 'customer') =>
+    apiFetch('/me', { method: 'PUT', body: JSON.stringify({ smmRole: smmMode }) }),
+
+  // Posts (the specialist's личная библиотека): video/photo collection +
+  // description per role — ONE post per role.
+  getPosts: (scope: 'mine' | 'user' = 'mine', userId?: string) =>
+    apiFetch(`/smm/posts?scope=${scope}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}`) as Promise<{ items: import('@/lib/app-types').SmmPostT[] }>,
+  createPost: (data: { roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; description: string; media?: unknown; coverColor?: string | null; coverIcon?: string | null }) =>
+    apiFetch('/smm/posts', { method: 'POST', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmPostT>,
+  updatePost: (id: string, data: { description?: string; media?: unknown; roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; coverColor?: string | null; coverIcon?: string | null }) =>
+    apiFetch(`/smm/posts/${id}`, { method: 'PUT', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmPostT>,
+  deletePost: (id: string) => apiFetch(`/smm/posts/${id}`, { method: 'DELETE' }),
+
+  // Events (the customer's личная библиотека / the specialist's публичная):
+  // the 4 facts (format, platform/location, time) + qualification tests.
+  getEvents: (scope: 'mine' | 'public' = 'public') =>
+    apiFetch(`/smm/events?scope=${scope}`) as Promise<{ items: import('@/lib/app-types').SmmEventT[] }>,
+  getEvent: (id: string) => apiFetch(`/smm/events/${id}`) as Promise<{ event: import('@/lib/app-types').SmmEventT }>,
+  createEvent: (data: Record<string, unknown>) =>
+    apiFetch('/smm/events', { method: 'POST', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmEventT>,
+  updateEvent: (id: string, data: Record<string, unknown>) =>
+    apiFetch(`/smm/events/${id}`, { method: 'PUT', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmEventT>,
+  deleteEvent: (id: string) => apiFetch(`/smm/events/${id}`, { method: 'DELETE' }),
+
+  // Specialists (the customer's публичная библиотека): cards with rating,
+  // orders count, roles + prices.
+  getSpecialists: () =>
+    apiFetch('/smm/specialists') as Promise<{ items: import('@/lib/app-types').SmmSpecialistT[] }>,
+  getMyRoles: () =>
+    apiFetch('/smm/roles') as Promise<{ items: import('@/lib/app-types').SmmRoleT[] }>,
+  deleteRole: (id: string) => apiFetch(`/smm/roles/${id}`, { method: 'DELETE' }),
+
+  // Заявки (the specialist applies to an event with one of their roles)
+  getApplications: () =>
+    apiFetch('/smm/applications') as Promise<{ items: import('@/lib/app-types').SmmRequestRowT[] }>,
+  createApplication: (data: { eventId: string; roleId: string; score: number; totalQuestions: number }) =>
+    apiFetch('/smm/applications', { method: 'POST', body: JSON.stringify(data) }),
+  deleteApplication: (id: string) => apiFetch(`/smm/applications/${id}`, { method: 'DELETE' }),
+
+  // Приглашения (the customer invites a specialist to an event with a role)
+  getInvitations: () =>
+    apiFetch('/smm/invitations') as Promise<{ items: import('@/lib/app-types').SmmRequestRowT[] }>,
+  createInvitation: (data: { specialistId: string; eventId: string; roleId: string; estimate?: number | null }) =>
+    apiFetch('/smm/invitations', { method: 'POST', body: JSON.stringify(data) }),
+  deleteInvitation: (id: string) => apiFetch(`/smm/invitations/${id}`, { method: 'DELETE' }),
+
+  // SMM bookmarks (закладки window): events / specialists / posts
+  getSmmBookmarks: () =>
+    apiFetch('/smm/bookmarks') as Promise<{ items: import('@/lib/app-types').SmmBookmarkRowT[] }>,
+  addSmmBookmark: (targetType: 'event' | 'specialist' | 'post', targetId: string) =>
+    apiFetch('/smm/bookmarks', { method: 'POST', body: JSON.stringify({ targetType, targetId }) }),
+  removeSmmBookmark: (targetType: string, targetId: string) =>
+    apiFetch(`/smm/bookmarks?targetType=${encodeURIComponent(targetType)}&targetId=${encodeURIComponent(targetId)}`, { method: 'DELETE' }),
+
+  // Chats (чат window): group chats + direct dialogs
+  getSmmChats: () =>
+    apiFetch('/smm/chats') as Promise<{ items: import('@/lib/app-types').SmmChatT[] }>,
+  createSmmChat: (title: string, peerId?: string) =>
+    apiFetch('/smm/chats', { method: 'POST', body: JSON.stringify({ title, peerId }) }) as Promise<import('@/lib/app-types').SmmChatT>,
+  renameSmmChat: (id: string, title: string) =>
+    apiFetch(`/smm/chats/${id}`, { method: 'PUT', body: JSON.stringify({ title }) }),
+  deleteSmmChat: (id: string) => apiFetch(`/smm/chats/${id}`, { method: 'DELETE' }),
+  getSmmChatMessages: (id: string, after?: string) =>
+    apiFetch(`/smm/chats/${id}/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`) as Promise<{ messages: import('@/lib/app-types').SmmChatMessageT[] }>,
+  sendSmmChatMessage: (id: string, text: string) =>
+    apiFetch(`/smm/chats/${id}/messages`, { method: 'POST', body: JSON.stringify({ text }) }) as Promise<import('@/lib/app-types').SmmChatMessageT>,
 };

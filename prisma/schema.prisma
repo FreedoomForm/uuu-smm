@@ -55,6 +55,8 @@ model User {
   smmCity      String  @default("")
   smmRate      String  @default("")
   smmReady     Boolean @default(true)
+  // Specialist rating shown on their card (0 = not rated yet → «—»)
+  smmRating    Float   @default(0)
   smmBookmarks SmmBookmark[]
   // Shared role templates («Общие роли») authored by this user
   smmSharedRoles         SmmSharedRole[] @relation("SmmSharedRoleAuthor")
@@ -69,6 +71,12 @@ model User {
   smmRequests            SmmRequest[]    @relation("SmmRequestSpecialist")
   // Public role task templates («Общие роли») authored by this user
   smmRoleTemplates       SmmRole[]       @relation("SmmRoleAuthor")
+  // Specialist's professional roles (the «роли» list on their card)
+  smmRoles               SmmRole[]       @relation("SmmRoleOwner")
+  // Posts (video / photo collection + description) — one per role
+  smmPosts               SmmPost[]
+  // Group chats this user created
+  smmChatsOwned          SmmChat[]       @relation("SmmChatOwner")
 }
 
 // Opaque session token → user. The phone stores ONLY the token cookie
@@ -155,6 +163,18 @@ model SmmEvent {
   restrictions String   @default("") // ограничения и доп. условия
   // Who is hiring: "business" (предприниматель) | "government" (государство)
   kind         String   @default("business")
+  // ── THE 4 EVENT FACTS (the interface elements every event card shows
+  // instead of the test card's questions/answers) ─────────────────────────
+  // Format: "online" | "offline". Online → platform (instagram |
+  // telegram | youtube | tiktok); offline → location text rendered as a
+  // live map embed on the card.
+  format       String   @default("online")
+  platform     String   @default("") // instagram | telegram | youtube | tiktok
+  location     String   @default("") // адрес / место (offline) — map embed
+  timeAt       String   @default("") // время проведения (текстом)
+  // Qualification tests the customer attached (their OWN tests, ordered):
+  // the specialist passes them on the «подать заявку» screen.
+  testIds      String[] @default([])
   coverColor   String?
   coverIcon    String?
   isPublic     Boolean  @default(true)
@@ -182,11 +202,19 @@ model SmmRole {
   payment  String   @default("")
   deadline String   @default("")
   orderNum Int      @default(0)
+  // ── SPECIALIST'S OWN ROLE («роли» on their card) ────────────────────────
+  // The specialist's price list for this role: per 1000 views (online
+  // events) and per day of 8 hours (offline events).
+  ownerId  String?
+  owner    User?    @relation("SmmRoleOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  pricePerK   Float?  // цена за 1000 просмотров (онлайн)
+  pricePerDay Float?  // цена за день (8 часов) участия (оффлайн)
   // Public template flag («Общие роли» — people share task templates)
   isPublic Boolean  @default(false)
   // Template author (null for the roles created inside an event)
   authorId String?
   author   User?    @relation("SmmRoleAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  posts    SmmPost[]
   createdAt DateTime @default(now())
   invitations SmmInvitation[]
   applications SmmApplication[]
@@ -194,6 +222,28 @@ model SmmRole {
   @@index([eventId, orderNum])
   @@index([isPublic, createdAt])
   @@index([authorId])
+  @@index([ownerId])
+}
+
+// ПОСТ — the specialist's card about their work for ONE role: a video or a
+// photo collection + a description. ONE post per role (@@unique(roleId)) —
+// the same specialist cannot have two posts about the same role.
+model SmmPost {
+  id           String   @id @default(cuid())
+  specialistId String
+  specialist   User     @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  roleId       String   @unique
+  role         SmmRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  description  String   @default("")
+  // Media list: [{ url, type: "video"|"image", title? }] — tg:/data:/https:
+  media        Json?
+  coverColor   String?
+  coverIcon    String?
+  isPublic     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([specialistId, createdAt])
 }
 
 // ЗАПРОС — the specialist's structured proposal: created with «+» (the test
@@ -248,12 +298,35 @@ model SmmInvitation {
   specialistId String
   specialist   User     @relation("SmmInvitationSpecialist", fields: [specialistId], references: [id], onDelete: Cascade)
   message      String   @default("") // уникальное ТЗ из «Дополнительных настроек»
+  // Примерная сумма (the estimate screen's number): pricePerDay × days for
+  // offline, pricePerK × expected blocks for online — computed at send time.
+  estimate     Float?
   status       String   @default("pending") // pending | accepted | declined
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([specialistId, status])
   @@index([eventId, status])
+}
+
+// ЧАТ — a conversation card: a GROUP chat anybody creates (title editable
+// by the owner) or a DIRECT dialog between a customer and a specialist
+// (auto-created when a заявка/приглашение is sent). Messages reuse
+// SmmChatMessage with scopeType="chat", scopeId=chat.id.
+model SmmChat {
+  id        String   @id @default(cuid())
+  kind      String   @default("group") // "group" | "direct"
+  title     String   @default("")
+  ownerId   String?
+  owner     User?    @relation("SmmChatOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  // Direct dialog pair (kind="direct", ordered so a<b — one row per pair)
+  aId       String?
+  bId       String?
+  lastMessageAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([kind, lastMessageAt])
+  @@index([ownerId])
 }
 
 // Заявка: the SPECIALIST applies to an event role («Подать заявку» → роль →
@@ -273,6 +346,10 @@ model SmmApplication {
   requestId    String?
   request      SmmRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
   message      String   @default("")
+  // Qualification result: the specialist's total correct answers across
+  // the event's tests (the number the customer sees in the chat message).
+  score         Int     @default(0)
+  totalQuestions Int    @default(0)
   status       String   @default("pending") // pending | accepted | declined
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -324,12 +401,14 @@ model SmmBookmark {
 // pattern as the per-test ChatMessage.
 model SmmChatMessage {
   id        String   @id @default(cuid())
-  scopeType String // "event" | "specialist" | "shared-role"
+  scopeType String // "event" | "specialist" | "shared-role" | "chat"
   scopeId   String
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userName  String
   text      String
+  // "text" = a normal user message, "system" = an auto-posted заявка/приглашение
+  kind      String   @default("text")
   createdAt DateTime @default(now())
 
   @@index([scopeType, scopeId, createdAt])
