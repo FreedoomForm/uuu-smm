@@ -23,7 +23,7 @@ import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { CreatorStrip } from '@/components/shared-bits';
+import { CreatorStrip, tagHash } from '@/components/shared-bits';
 import { eventPlatformIcon, eventPlatformLabel, fmtMoney, mapEmbedUrl, mediaSrc } from './smm-bits';
 import { CalendarClock, ClipboardList, Bot, Film, LayoutGrid, Link2, MapPin, MessageCircle, Paperclip, Pencil, Star, Trash2, Users } from 'lucide-react';
 import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
@@ -66,9 +66,21 @@ export interface CardCtx {
   onImageOpen?: (url: string) => void;
 }
 
-const LADDER_BTN = 'h-7 rounded-full border-black text-[10px] sm:text-[11px] lg:h-9 lg:text-xs px-1.5 justify-start gap-1 has-[>svg]:px-1 w-full';
+const LADDER_BTN = 'h-7 rounded-full border-black text-[10px] sm:text-[11px] lg:h-9 lg:text-xs px-1.5 justify-start gap-1 has-[>svg]:px-1';
 // The AI button wears the test card's active look when its window is open
 const LADDER_AI_ACTIVE = 'border-primary bg-[#FFE8DE]';
+
+// ── THE FEED CARD ANATOMY — byte-for-byte the test feed card's: the title
+// lives on the colour SPINE (the narrow left band), the content column
+// (шапка + specifics + ladder) sits to the right. The same shell the test
+// feed cards keep (lg:max-w-4xl), so the SMM feed scrolls EXACTLY like the
+// tests feed.
+const FEED_SHELL = 'h-full min-h-0 lg:max-w-4xl lg:w-full lg:mx-auto flex rounded-2xl border bg-white overflow-hidden hover:border-black/40 active:scale-[0.99] transition-all text-left cursor-pointer';
+const FEED_SPINE = 'w-20 sm:w-36 lg:w-44 shrink-0 h-full flex items-center justify-center p-2 text-center';
+const FEED_SPINE_TITLE = 'text-xs sm:text-base font-bold text-cta leading-snug line-clamp-3';
+const FEED_CONTENT = 'flex-1 min-w-0 flex flex-col p-2 sm:p-3 lg:p-4';
+// The same pastel spine palette the test cards pick from (coverBgFor).
+const SPINE_PALETTE = ['bg-[#E3EEFF]', 'bg-[#DFF3E8]', 'bg-[#FFF0D9]', 'bg-[#FCE8F2]'];
 
 // The SAME card header every card of the site wears (tests + SMM): the
 // gradient band with the author's photo and the bookmark toggle.
@@ -97,7 +109,7 @@ const CARD_SHELL = 'h-full min-h-0 flex flex-col rounded-2xl border bg-white p-2
 
 // ── МЕРОПРИЯТИЕ ─────────────────────────────────────────────────────────────
 
-export function EventFacts({ event, t, compact }: { event: SmmEventT; t: CardCtx['t']; compact?: boolean }) {
+export function EventFacts({ event, t, compact, feed }: { event: SmmEventT; t: CardCtx['t']; compact?: boolean; feed?: boolean }) {
   const chip = 'flex items-center gap-1.5 rounded-full bg-white/90 border border-black/10 px-2.5 py-1 text-[11px] sm:text-xs font-semibold text-black/80 shadow-sm';
   return (
     <div className="flex flex-col gap-1.5">
@@ -116,14 +128,15 @@ export function EventFacts({ event, t, compact }: { event: SmmEventT; t: CardCtx
       </div>
       {/* The offline map — the feed (and window) cards carry the live map;
       grid cards stay compact like the test grid cards (the chips above keep
-      the факт visible). */}
+      the факт visible). The feed spine layout keeps the map shorter so the
+      whole card fits the snap page. */}
       {!compact && event.format === 'offline' && event.location && (
         <div className="rounded-2xl overflow-hidden border border-black/10 bg-white">
           <iframe
             src={mapEmbedUrl(event.location)}
             title={t('smmEventLocation')}
             loading="lazy"
-            className="w-full h-28 sm:h-36 border-0 pointer-events-none"
+            className={`w-full ${feed ? 'h-16 sm:h-24' : 'h-28 sm:h-36'} border-0 pointer-events-none`}
           />
           <p className="px-2.5 py-1.5 text-[11px] sm:text-xs text-muted-foreground flex items-center gap-1.5">
             <MapPin className="w-3.5 h-3.5 shrink-0 text-cta" /> <span className="truncate">{event.location}</span>
@@ -141,85 +154,98 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
   const bgStyle = event.coverColor ? { backgroundColor: event.coverColor } : undefined;
   const bgClass = event.coverColor ? '' : 'bg-[#E3EEFF]';
   const showRolePicker = !own && ctx.myRoles.length > 0;
+  const rolePicker = showRolePicker && (
+    <div className="shrink-0" onClick={e => e.stopPropagation()}>
+      <p className="text-[11px] font-semibold text-muted-foreground mb-1">{t('smmApplyPickRole')}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {ctx.myRoles.map(r => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => ctx.onPickRole(r.id)}
+            className={`h-7 px-2.5 rounded-full border-2 text-[11px] font-bold transition-colors ${ctx.pickedRole === r.id ? 'bg-cta text-white border-cta' : 'bg-white border-black/20 hover:border-black'}`}
+          >
+            {r.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  const ladder = (
+    <div className="card-ladder shrink-0 pt-1.5 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
+      <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
+        <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
+        <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: (event.tests || []).length + ((event.attachments || []).length) })} className={LADDER_BTN}>
+        <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
+        <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
+      </Button>
+      {/* The Public level (the own test cards keep it) — a VERSION (a copy
+      of somebody's мероприятие) never wears it: like the tests, a version
+      can never be made public (the server coerces the flag too). */}
+      {own && !event.parentId && (
+        <Button size="sm" variant="outline" onClick={ctx.onPublic} title={t('makePublic')} className={LADDER_BTN}>
+          <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
+        </Button>
+      )}
+      <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
+        <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmEventDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
+        <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
+      </Button>
+    </div>
+  );
+  if (isFeed) {
+    /* FEED — the test feed card's SPINE anatomy: the title lives on the
+    colour spine (the narrow left band), the content column (шапка + факты +
+    лестница) sits to the right — the same layout, widths and paddings the
+    test feed cards keep. */
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={ctx.onOpen}
+        className={`${FEED_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'}`}
+      >
+        <div style={bgStyle} className={`${bgClass} ${FEED_SPINE}`}>
+          <p className={FEED_SPINE_TITLE}>{event.title}</p>
+        </div>
+        <div className={FEED_CONTENT}>
+          <CardHeader ctx={ctx} name={event.customer?.name || ''} creatorId={event.customerId} image={event.customer?.image} compact />
+          <div className="flex-1 min-h-0 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="shrink-0"><EventFacts event={event} t={t} feed /></div>
+            {event.summary && <p className="mt-1.5 text-[11px] sm:text-xs text-muted-foreground line-clamp-2">{event.summary}</p>}
+            {rolePicker}
+          </div>
+          {ladder}
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={ctx.onOpen}
-      className={`${CARD_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'} ${isFeed ? 'lg:max-w-2xl lg:w-full lg:mx-auto' : ''}`}
+      className={`${CARD_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'}`}
     >
       {/* THE STANDARD CARD HEADER — the same шапка every card wears */}
-      <CardHeader ctx={ctx} name={event.customer?.name || ''} creatorId={event.customerId} image={event.customer?.image} compact={!isFeed} />
-      {isFeed ? (
-        /* feed: the title lives on the cover band — the same big bold
-        text-cta band the test feed cards wear */
-        <div className="relative mt-2 shrink-0 overflow-hidden rounded-2xl h-24 sm:h-32">
-          <div style={bgStyle} className={`${bgClass} w-full h-full flex items-center justify-center px-3 text-center`}>
-            <p className="text-lg sm:text-2xl font-bold text-cta leading-snug line-clamp-2">{event.title}</p>
-          </div>
-        </div>
-      ) : (
-        /* grid: the plain bold title — the same line the test grid cards wear */
-        <p className="text-[13px] sm:text-sm lg:text-[15px] font-bold leading-snug line-clamp-2">{event.title}</p>
-      )}
+      <CardHeader ctx={ctx} name={event.customer?.name || ''} creatorId={event.customerId} image={event.customer?.image} compact />
+      {/* grid: the plain bold title — the same line the test grid cards wear */}
+      <p className="text-[13px] sm:text-sm lg:text-[15px] font-bold leading-snug line-clamp-2">{event.title}</p>
       {/* the 4 FACTS */}
       <div className="mt-2 shrink-0">
-        <EventFacts event={event} t={t} compact={!isFeed} />
+        <EventFacts event={event} t={t} compact />
       </div>
-      {event.summary && <p className={`mt-2 text-xs sm:text-sm text-muted-foreground ${isFeed ? 'line-clamp-3' : 'line-clamp-2'}`}>{event.summary}</p>}
-      {/* role picker (the specialist picks THEIR role to apply with) */}
-      {showRolePicker && (
-        <div className="mt-2 shrink-0" onClick={e => e.stopPropagation()}>
-          <p className="text-[11px] font-semibold text-muted-foreground mb-1">{t('smmApplyPickRole')}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {ctx.myRoles.map(r => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => ctx.onPickRole(r.id)}
-                className={`h-7 px-2.5 rounded-full border-2 text-[11px] font-bold transition-colors ${ctx.pickedRole === r.id ? 'bg-cta text-white border-cta' : 'bg-white border-black/20 hover:border-black'}`}
-              >
-                {r.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {/* ladder — the SAME ladder every card of the site carries, the test
-      card's one-button-per-level order: AI → Chat → Files → Share →
-      Public → Edit → Delete. The five buttons the user named — Чат, ИИ чат,
-      Прикреплённые файлы, Удалить, Изменить — stand on EVERY card ALWAYS;
-      each works exactly like its test-card counterpart (the group-chat
-      window, the AI panel, the files window, the delete dialog, the editor
-      — with the copy-then-edit rule for somebody else's card). */}
-      <div className="card-ladder mt-auto pt-2 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
-        <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
-          <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
-          <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: (event.tests || []).length + ((event.attachments || []).length) })} className={LADDER_BTN}>
-          <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
-          <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
-        </Button>
-        {/* The Public level (the own test cards keep it) — a VERSION (a copy
-        of somebody's мероприятие) never wears it: like the tests, a version
-        can never be made public (the server coerces the flag too). */}
-        {own && !event.parentId && (
-          <Button size="sm" variant="outline" onClick={ctx.onPublic} title={t('makePublic')} className={LADDER_BTN}>
-            <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
-          </Button>
-        )}
-        <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
-          <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmEventDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
-          <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
-        </Button>
-      </div>
+      {event.summary && <p className="mt-2 text-xs sm:text-sm text-muted-foreground line-clamp-2">{event.summary}</p>}
+      {rolePicker}
+      {ladder}
     </div>
   );
 }
@@ -235,89 +261,97 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
   const media = (post.media || []) as { url: string; type: string }[];
   const first = media[0];
   const title = post.role?.name || t('smmPost');
+  const ladder = (
+    <div className="card-ladder shrink-0 pt-1.5 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
+      <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
+        <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
+        <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length + ((post.attachments || []).length) })} className={LADDER_BTN}>
+        <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
+        <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('smmPostEdit')} className={LADDER_BTN}>
+        <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmPostDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
+        <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
+      </Button>
+    </div>
+  );
+  // the media thumbs — the post's specifics line (the place the test feed
+  // card keeps its tags/question-count lines)
+  const thumbs = (
+    <div className="flex gap-1.5 overflow-x-auto shrink-0" onClick={e => e.stopPropagation()}>
+      {media.slice(0, 8).map((m, i) => (
+        m.type === 'image' ? (
+          <button key={i} type="button" onClick={() => ctx.onImageOpen?.(mediaSrc(m.url))} className="w-12 h-12 rounded-lg overflow-hidden border border-black/10 shrink-0">
+            <img src={mediaSrc(m.url)} alt="" className="w-full h-full object-cover" />
+          </button>
+        ) : (
+          <span key={i} className="w-12 h-12 rounded-lg bg-[#FFF0D9] text-cta flex items-center justify-center shrink-0"><Film className="w-5 h-5" /></span>
+        )
+      ))}
+      {media.length === 0 && <span className="text-[11px] sm:text-xs text-muted-foreground py-3">{t('smmPost')}</span>}
+    </div>
+  );
+  if (isFeed) {
+    /* FEED — the test feed card's SPINE anatomy: the role name lives on the
+    colour spine, the content column (шапка + media thumbs + description +
+    лестница) sits to the right — byte-for-byte the test feed layout. */
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={ctx.onOpen}
+        className={`${FEED_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'}`}
+      >
+        <div style={bgStyle} className={`${bgClass} ${FEED_SPINE}`}>
+          <p className={FEED_SPINE_TITLE}>{title}</p>
+        </div>
+        <div className={FEED_CONTENT}>
+          <CardHeader ctx={ctx} name={post.specialist?.name || ''} creatorId={post.specialistId} image={post.specialist?.image} compact />
+          <div className="flex-1 min-h-0 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {thumbs}
+            {post.description && <p className="mt-1.5 text-[11px] sm:text-xs text-muted-foreground whitespace-pre-wrap line-clamp-3">{post.description}</p>}
+          </div>
+          {ladder}
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={ctx.onOpen}
-      className={`${CARD_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'} ${isFeed ? 'lg:max-w-2xl lg:w-full lg:mx-auto' : ''}`}
+      className={`${CARD_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'}`}
     >
-      <CardHeader ctx={ctx} name={post.specialist?.name || ''} creatorId={post.specialistId} image={post.specialist?.image} compact={!isFeed} />
-      {isFeed ? (
-        /* feed: the cover band carries the first media (or the role name on
-        the cover color) — the same band the test feed cards wear */
-        <div className="relative mt-2 shrink-0 overflow-hidden rounded-2xl h-32 sm:h-40">
-          {first ? (
-            first.type === 'video' ? (
-              <div style={bgStyle} className={`${bgClass} w-full h-full flex items-center justify-center gap-2`}>
-                <Film className="w-8 h-8 text-cta" />
-                <p className="text-lg sm:text-2xl font-bold text-cta">{title}</p>
-              </div>
-            ) : (
-              <img src={mediaSrc(first.url)} alt="" className="w-full h-full object-cover" />
-            )
-          ) : (
-            <div style={bgStyle} className={`${bgClass} w-full h-full flex items-center justify-center px-3 text-center`}>
-              <p className="text-lg sm:text-2xl font-bold text-cta line-clamp-2">{title}</p>
+      <CardHeader ctx={ctx} name={post.specialist?.name || ''} creatorId={post.specialistId} image={post.specialist?.image} compact />
+      {/* grid: the plain bold title + the compact media band */}
+      <p className="text-[13px] sm:text-sm lg:text-[15px] font-bold leading-snug line-clamp-2">{title}</p>
+      <div className="relative mt-1.5 shrink-0 overflow-hidden rounded-2xl h-16 sm:h-20">
+        {first ? (
+          first.type === 'video' ? (
+            <div style={bgStyle} className={`${bgClass} w-full h-full flex items-center justify-center gap-2`}>
+              <Film className="w-6 h-6 text-cta" />
+              <p className="text-sm font-bold text-cta">{title}</p>
             </div>
-          )}
-        </div>
-      ) : (
-        /* grid: the plain bold title + the compact media band */
-        <>
-          <p className="text-[13px] sm:text-sm lg:text-[15px] font-bold leading-snug line-clamp-2">{title}</p>
-          <div className="relative mt-1.5 shrink-0 overflow-hidden rounded-2xl h-16 sm:h-20">
-            {first ? (
-              first.type === 'video' ? (
-                <div style={bgStyle} className={`${bgClass} w-full h-full flex items-center justify-center gap-2`}>
-                  <Film className="w-6 h-6 text-cta" />
-                  <p className="text-sm font-bold text-cta">{title}</p>
-                </div>
-              ) : (
-                <img src={mediaSrc(first.url)} alt="" className="w-full h-full object-cover" />
-              )
-            ) : (
-              <div style={bgStyle} className={`${bgClass} w-full h-full flex items-center justify-center`}>
-                <p className="text-sm font-bold text-cta line-clamp-2 px-2">{title}</p>
-              </div>
-            )}
+          ) : (
+            <img src={mediaSrc(first.url)} alt="" className="w-full h-full object-cover" />
+          )
+        ) : (
+          <div style={bgStyle} className={`${bgClass} w-full h-full flex items-center justify-center`}>
+            <p className="text-sm font-bold text-cta line-clamp-2 px-2">{title}</p>
           </div>
-        </>
-      )}
-      {isFeed && media.length > 1 && (
-        <div className="mt-2 flex gap-1.5 overflow-x-auto shrink-0" onClick={e => e.stopPropagation()}>
-          {media.slice(0, 8).map((m, i) => (
-            m.type === 'image' ? (
-              <button key={i} type="button" onClick={() => ctx.onImageOpen?.(mediaSrc(m.url))} className="w-12 h-12 rounded-lg overflow-hidden border border-black/10 shrink-0">
-                <img src={mediaSrc(m.url)} alt="" className="w-full h-full object-cover" />
-              </button>
-            ) : (
-              <span key={i} className="w-12 h-12 rounded-lg bg-[#FFF0D9] text-cta flex items-center justify-center shrink-0"><Film className="w-5 h-5" /></span>
-            )
-          ))}
-        </div>
-      )}
-      {post.description && <p className={`mt-2 text-xs sm:text-sm text-muted-foreground whitespace-pre-wrap ${isFeed ? 'line-clamp-6' : 'line-clamp-2'}`}>{post.description}</p>}
-      <div className="card-ladder mt-auto pt-2 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
-        <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
-          <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
-          <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length + ((post.attachments || []).length) })} className={LADDER_BTN}>
-          <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
-          <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('smmPostEdit')} className={LADDER_BTN}>
-          <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmPostDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
-          <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
-        </Button>
+        )}
       </div>
+      {post.description && <p className="mt-2 text-xs sm:text-sm text-muted-foreground whitespace-pre-wrap line-clamp-2">{post.description}</p>}
+      {ladder}
     </div>
   );
 }
@@ -327,76 +361,117 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
 export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT; variant: CardVariant; ctx: CardCtx }) {
   const { t } = ctx;
   const isFeed = variant === 'feed';
+  // the specialist's spine colour — hashed from the id, the same pastel
+  // palette the test spines pick from
+  const spBg = SPINE_PALETTE[tagHash(sp.id || sp.name || '?') % SPINE_PALETTE.length];
+  const ratingLine = (
+    <div className="shrink-0 flex items-center gap-2 min-w-0">
+      <p className="font-bold leading-snug truncate text-xs sm:text-sm">{sp.name}</p>
+      <span className="flex items-center gap-2 text-[11px] sm:text-xs text-muted-foreground shrink-0">
+        <span className="flex items-center gap-1"><Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" /> {sp.rating > 0 ? sp.rating.toFixed(1) : '—'}</span>
+        <span>· {t('smmOrders')}: {sp.orders}</span>
+      </span>
+    </div>
+  );
+  const rolesPrices = (
+    <div className="shrink-0 flex flex-col gap-1">
+      <p className="text-[11px] font-semibold text-muted-foreground">{t('smmRolesList')}</p>
+      {(sp.roles || []).length === 0 && <p className="text-xs text-muted-foreground">—</p>}
+      {(sp.roles || []).map(r => (
+        <button
+          key={r.id}
+          type="button"
+          onClick={e => { e.stopPropagation(); ctx.onPickInvRole(r.id); }}
+          className={`flex items-center justify-between gap-2 rounded-xl border-2 px-2.5 py-1.5 text-left transition-colors ${ctx.pickedInvRole === r.id ? 'border-cta bg-[#FFF3ED]' : 'border-black/10 hover:border-black/30'}`}
+        >
+          <span className="text-xs sm:text-sm font-bold truncate">{r.name}</span>
+          <span className="text-[10px] sm:text-[11px] text-muted-foreground shrink-0 flex flex-col items-end leading-tight">
+            {r.pricePerK != null && <span>{t('smmEstimateOnline')}: {fmtMoney(r.pricePerK)}</span>}
+            {r.pricePerDay != null && <span>{t('smmEstimateOffline')}: {fmtMoney(r.pricePerDay)}</span>}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+  const eventPicker = (
+    <div className="shrink-0 flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
+      <p className="text-[11px] font-semibold text-muted-foreground">{t('smmInvitePickEvent')}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {(ctx.myEvents || []).length === 0 && <p className="text-[11px] text-muted-foreground">{t('smmInviteNoEvent')}</p>}
+        {(ctx.myEvents || []).map(ev => (
+          <button
+            key={ev.id}
+            type="button"
+            onClick={() => ctx.onPickEvent(ev.id)}
+            className={`h-7 max-w-[180px] px-2.5 rounded-full border-2 text-[11px] font-bold truncate transition-colors ${ctx.pickedEvent === ev.id ? 'bg-cta text-white border-cta' : 'bg-white border-black/20 hover:border-black'}`}
+          >
+            {ev.title}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  const ladder = (
+    <div className="card-ladder shrink-0 pt-1.5 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
+      <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
+        <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
+        <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('gFiles')} className={LADDER_BTN}>
+        <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
+        <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
+      </Button>
+      <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmSpecialistDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
+        <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
+      </Button>
+    </div>
+  );
+  if (isFeed) {
+    /* FEED — the test feed card's SPINE anatomy: the specialist's name on
+    the colour spine, the content column (шапка + rating + roles/prices +
+    лестница) sits to the right — the exact test feed layout. */
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={ctx.onOpen}
+        className={`${FEED_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'}`}
+      >
+        <div className={`${spBg} ${FEED_SPINE}`}>
+          <p className={FEED_SPINE_TITLE}>{sp.name}</p>
+        </div>
+        <div className={FEED_CONTENT}>
+          <CardHeader ctx={ctx} name={sp.name} creatorId={sp.id} image={sp.image} compact />
+          <div className="flex-1 min-h-0 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {ratingLine}
+            <div className="mt-1.5">{rolesPrices}</div>
+            {eventPicker}
+          </div>
+          {ladder}
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={ctx.onOpen}
-      className={`${CARD_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'} ${isFeed ? 'lg:max-w-2xl lg:w-full lg:mx-auto' : ''}`}
+      className={`${CARD_SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'}`}
     >
-      <CardHeader ctx={ctx} name={sp.name} creatorId={sp.id} image={sp.image} compact={!isFeed} />
+      <CardHeader ctx={ctx} name={sp.name} creatorId={sp.id} image={sp.image} compact />
       {/* grid: the plain bold name + the rating/orders line — the same title
       line the test grid cards wear under the strip */}
-      <div className="mt-1 shrink-0 flex items-center gap-2 min-w-0">
-        <p className={`font-bold leading-snug truncate ${isFeed ? 'text-base sm:text-lg' : 'text-[13px] sm:text-sm lg:text-[15px]'}`}>{sp.name}</p>
-        <span className="flex items-center gap-2 text-[11px] sm:text-xs text-muted-foreground shrink-0">
-          <span className="flex items-center gap-1"><Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" /> {sp.rating > 0 ? sp.rating.toFixed(1) : '—'}</span>
-          <span>· {t('smmOrders')}: {sp.orders}</span>
-        </span>
-      </div>
+      {ratingLine}
       {/* roles + prices (the 4 params live here: pricePerK + pricePerDay per role) */}
-      <div className="mt-2 shrink-0 flex flex-col gap-1">
-        <p className="text-[11px] font-semibold text-muted-foreground">{t('smmRolesList')}</p>
-        {(sp.roles || []).length === 0 && <p className="text-xs text-muted-foreground">—</p>}
-        {(sp.roles || []).map(r => (
-          <button
-            key={r.id}
-            type="button"
-            onClick={e => { e.stopPropagation(); ctx.onPickInvRole(r.id); }}
-            className={`flex items-center justify-between gap-2 rounded-xl border-2 px-2.5 py-1.5 text-left transition-colors ${ctx.pickedInvRole === r.id ? 'border-cta bg-[#FFF3ED]' : 'border-black/10 hover:border-black/30'}`}
-          >
-            <span className="text-xs sm:text-sm font-bold truncate">{r.name}</span>
-            <span className="text-[10px] sm:text-[11px] text-muted-foreground shrink-0 flex flex-col items-end leading-tight">
-              {r.pricePerK != null && <span>{t('smmEstimateOnline')}: {fmtMoney(r.pricePerK)}</span>}
-              {r.pricePerDay != null && <span>{t('smmEstimateOffline')}: {fmtMoney(r.pricePerDay)}</span>}
-            </span>
-          </button>
-        ))}
-      </div>
+      <div className="mt-2">{rolesPrices}</div>
       {/* the customer's picks: event + role */}
-      <div className="mt-2 shrink-0 flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
-        <p className="text-[11px] font-semibold text-muted-foreground">{t('smmInvitePickEvent')}</p>
-        <div className="flex flex-wrap gap-1.5">
-          {(ctx.myEvents || []).length === 0 && <p className="text-[11px] text-muted-foreground">{t('smmInviteNoEvent')}</p>}
-          {(ctx.myEvents || []).map(ev => (
-            <button
-              key={ev.id}
-              type="button"
-              onClick={() => ctx.onPickEvent(ev.id)}
-              className={`h-7 max-w-[180px] px-2.5 rounded-full border-2 text-[11px] font-bold truncate transition-colors ${ctx.pickedEvent === ev.id ? 'bg-cta text-white border-cta' : 'bg-white border-black/20 hover:border-black'}`}
-            >
-              {ev.title}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="card-ladder mt-auto pt-2 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
-        <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
-          <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
-          <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('gFiles')} className={LADDER_BTN}>
-          <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
-          <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmSpecialistDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
-          <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
-        </Button>
-      </div>
+      <div className="mt-2">{eventPicker}</div>
+      {ladder}
     </div>
   );
 }

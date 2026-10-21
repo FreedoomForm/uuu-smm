@@ -152,6 +152,12 @@ export default function SmmDashboard() {
   // target built at the card's «Файлы» click — the same cache the tests'
   // dashFilesCountRef keeps)
   const filesItemRef = useRef<Record<string, SmmFilesTarget>>({});
+  // EVERY card ever rendered (dashboard feed/grid, profile window, bookmarks)
+  // lands here — «Изменить» must know own-vs-somebody's from ANY surface,
+  // not only from the current dashboard list (the profile-window cards are
+  // NOT in `items`; the old lookup failed there and an OWN card went through
+  // the copy path and errored — the button did not «always work»).
+  const seenItemsRef = useRef<Record<string, AnyItem>>({});
 
   // ── «Обсудить с ИИ» window state (per-card threads in localStorage) ──
   const [aiOpen, setAiOpen] = useState(false);
@@ -467,11 +473,13 @@ export default function SmmDashboard() {
     else if (topWindow !== 'none') return;
     if (!activeItem) return;
     // the SAME edit window the card's «Изменить» button opens (own → window;
-    // somebody else's → private version copy first)
+    // somebody else's → private version copy first, then the jump into the
+    // copier's own account/library)
     void openEditWindow(
       activeItem.kind,
       activeItem.id,
       activeItem.kind === 'event' ? activeItem.title : activeItem.kind === 'post' ? (activeItem.role?.name || t('smmPost')) : activeItem.name,
+      activeItem,
     );
   };
 
@@ -571,9 +579,13 @@ export default function SmmDashboard() {
   // ── THE EDIT WINDOW TARGET («Изменить» from a card or the switcher) ─────
   // Somebody else's мероприятие/пост is NEVER edited in place — the test-card
   // rule (startEditTest → copyTest): the server makes a private VERSION of
-  // the original (parentId = the source) that lands in MY личная библиотека
-  // and opens in the edit window. Own cards open in the window directly.
-  const openEditWindow = async (kind: 'event' | 'post' | 'specialist', id: string, title: string) => {
+  // the original (parentId = the source). THEN THE USER'S RULE kicks in:
+  // «Изменить» ALWAYS works and TRANSLATES the user into their own account —
+  // the копия lands in the ЛИЧНАЯ библиотека of the matching side (event →
+  // заказчик, post → СММ специалист), so after the click the user stands in
+  // their own library with the template editable right there. Own cards open
+  // in the window directly (no copy, no jump).
+  const openEditWindow = async (kind: 'event' | 'post' | 'specialist', id: string, title: string, item?: AnyItem) => {
     // one window at a time: the AI panel / files / chat windows yield
     setAiOpen(false);
     useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
@@ -584,16 +596,25 @@ export default function SmmDashboard() {
       else toast(t('smmEditOwnOnly'));
       return;
     }
-    const own = kind === 'post'
-      ? (items.find(x => x.id === id) as any)?.specialistId === myId
-      : (items.find(x => x.id === id) as any)?.customerId === myId;
+    // own-or-not: the captured card first, then the seen-cards cache (every
+    // rendered card), then the current dashboard list — the button must work
+    // from EVERY surface the card can appear on.
+    const known = (item as any) || (seenItemsRef.current as any)[id] || (items.find(x => x.id === id) as any);
+    const own = kind === 'post' ? known?.specialistId === myId : known?.customerId === myId;
     if (own) { setEditWin({ kind, id, title }); return; }
     setBusy(true);
     toast(t('copyCreating'));
     try {
       const copy: any = kind === 'post' ? await api.copySmmPost(id) : await api.copySmmEvent(id);
-      toast(t('copyCreated'));
-      bumpAndReload();
+      // THE JUMP: the version already belongs to the copier (customerId =
+      // me) — switch to that account side, open the ЛИЧНАЯ библиотека and
+      // reload, so the template is sitting there editable when the window
+      // closes. (switchMode also closes the profile window the click may
+      // have come from.)
+      toast(t('smmCopyLanded'));
+      await switchMode(kind === 'event' ? 'customer' : 'specialist');
+      gotoLibrary(false);
+      useSmmStore.setState((s: any) => ({ refreshNonce: (s.refreshNonce || 0) + 1 }));
       setEditWin({ kind, id: copy.id, title });
     } catch (e: any) {
       toast(e?.message || 'Error');
@@ -745,7 +766,7 @@ export default function SmmDashboard() {
       useSmmStore.setState({ cardChat: { kind: it.kind, id: it.id, title }, topWindow: 'card-chat', openChatId: null });
     },
     onShare: () => { if (it.kind !== 'specialist') void doShare(it.kind, it.id); },
-    onEdit: () => { openEditWindow(it.kind, it.id, it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name); },
+    onEdit: () => { openEditWindow(it.kind, it.id, it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name, it); },
     onDelete: () => {
       // «Удалить» opens the same confirm-first dialog the test cards open —
       // the delete itself happens only after the confirmation.
@@ -842,6 +863,7 @@ export default function SmmDashboard() {
     : topWindow === 'profile' ? t('smmViewProfile') : null;
 
   const renderCard = (it: AnyItem, selected: boolean, variant: 'grid' | 'feed') => {
+    seenItemsRef.current[it.id] = it; // «Изменить» own-detection from ANY surface
     const ctx = makeCtx(it, selected);
     if (it.kind === 'event') return <SmmEventCardView key={it.id} event={it} variant={variant} ctx={ctx} />;
     if (it.kind === 'post') return <SmmPostCardView key={it.id} post={it} variant={variant} ctx={ctx} />;
