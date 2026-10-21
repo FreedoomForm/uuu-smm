@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { tUI } from '@/lib/i18n';
+import { CreatorStrip } from '@/components/shared-bits';
 import {
   ArrowLeft, Compass, Edit, Library, LayoutGrid, Loader2, MessageCircle,
   Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList,
@@ -31,7 +32,7 @@ import { useNavStore } from '@/stores/nav-store';
 import { useDashboardStore } from '@/stores/dashboard-store';
 import { useProfileStore } from '@/stores/profile-store';
 import { useSmmStore, smmNow, type SmmMode } from '@/stores/smm-store';
-import type { SmmChatT, SmmEventT, SmmPostT, SmmRequestRowT, SmmSpecialistT } from '@/lib/app-types';
+import type { SmmChatT, SmmEventT, SmmPostT, SmmRequestRowT, SmmRoleT, SmmSpecialistT, SmmProfileT } from '@/lib/app-types';
 import {
   BookmarkRow, ChatRow, RequestRow, SmmEventCardView, SmmPostCardView, SmmSpecialistCardView, type CardCtx,
 } from './smm-cards';
@@ -66,12 +67,13 @@ export default function SmmDashboard() {
   const pickedInviteRole = useSmmStore(s => s.pickedInviteRole);
   const refreshNonce = useSmmStore(s => s.refreshNonce);
   const openChatId = useSmmStore(s => s.openChatId);
+  const profileUserId = useSmmStore(s => s.profileUserId);
 
   // ── data ────────────────────────────────────────────────────────────────
   const [items, setItems] = useState<AnyItem[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [myRoles, setMyRoles] = useState<{ id: string; name: string }[]>([]);
-  const [myEvents, setMyEvents] = useState<{ id: string; title: string }[]>([]);
+  const [myEvents, setMyEvents] = useState<{ id: string; title: string; format?: 'online' | 'offline' }[]>([]);
   const [bookmarks, setBookmarks] = useState<import('@/lib/app-types').SmmBookmarkRowT[]>([]);
   const [chats, setChats] = useState<SmmChatT[]>([]);
   const [chatMessages, setChatMessages] = useState<import('@/lib/app-types').SmmChatMessageT[]>([]);
@@ -84,6 +86,8 @@ export default function SmmDashboard() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [smmBookmarksSet, setSmmBookmarksSet] = useState<Set<string>>(new Set());
+  const [profileData, setProfileData] = useState<SmmProfileT | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [imgPreview, setImgPreview] = useState<string | null>(null);
@@ -106,7 +110,7 @@ export default function SmmDashboard() {
         api.getSmmBookmarks().catch(() => ({ items: [] })),
       ]);
       setMyRoles((roles.items || []).map((r: any) => ({ id: r.id, name: r.name })));
-      setMyEvents((evs.items || []).map((e: any) => ({ id: e.id, title: e.title })));
+      setMyEvents((evs.items || []).map((e: any) => ({ id: e.id, title: e.title, format: e.format })));
       setBookmarks(bms.items || []);
       setSmmBookmarksSet(new Set((bms.items || []).map((b: any) => `${b.targetType}:${b.targetId}`)));
       let list: AnyItem[] = [];
@@ -149,6 +153,19 @@ export default function SmmDashboard() {
     if (topWindow === 'bookmarks') void loadLists();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topWindow]);
+
+  // The profile window data — refetched for every profileUserId (and after a
+  // refresh bump, e.g. an invite sent from the profile)
+  useEffect(() => {
+    if (topWindow !== 'profile' || !profileUserId) { setProfileData(null); return; }
+    let alive = true;
+    setProfileLoading(true);
+    api.getSmmProfile(profileUserId)
+      .then(r => { if (alive) setProfileData(r); })
+      .catch(() => { if (alive) setProfileData(null); })
+      .finally(() => { if (alive) setProfileLoading(false); });
+    return () => { alive = false; };
+  }, [topWindow, profileUserId, refreshNonce]);
 
   // open chat messages + poll
   useEffect(() => {
@@ -202,13 +219,14 @@ export default function SmmDashboard() {
     useSmmStore.setState({
       smmMode: m, topWindow: 'none', editMode: false, activeCardId: null,
       pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, openChatId: null,
+      profileUserId: null,
     });
     api.setSmmMode(m).catch(() => {});
   };
 
   const gotoLibrary = (discover: boolean) => {
     setDiscoverMode(discover);
-    useSmmStore.setState({ topWindow: 'none', activeCardId: null, openChatId: null, pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null });
+    useSmmStore.setState({ topWindow: 'none', activeCardId: null, openChatId: null, pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, profileUserId: null });
   };
 
   const toggleBookmark = async (targetType: 'event' | 'specialist' | 'post', targetId: string) => {
@@ -310,16 +328,19 @@ export default function SmmDashboard() {
     setPage('smm-apply');
   };
 
-  const inviteFromCard = () => {
-    if (!activeSpecialist || !pickedInviteEvent || !pickedInviteRole) return;
-    const role = activeSpecialist.roles.find(r => r.id === pickedInviteRole);
-    const ev = myEvents.find(e => e.id === pickedInviteEvent);
+  // Приглашение: примерная сумма depends on the EVENT's format — онлайн =
+  // цена за 1000 просмотров, оффлайн = цена за день (8 часов).
+  const inviteFrom = (sp: { id: string; name: string; roles: SmmRoleT[] }, pickedEventId: string | null, pickedRoleId: string | null) => {
+    if (!sp || !pickedEventId || !pickedRoleId) return;
+    const role = sp.roles.find(r => r.id === pickedRoleId);
+    const ev = myEvents.find(e => e.id === pickedEventId);
     if (!role || !ev) return;
-    const format: 'online' | 'offline' = 'online';
+    const format: 'online' | 'offline' = ev.format === 'offline' ? 'offline' : 'online';
+    const estimate = format === 'online' ? (role.pricePerK ?? null) : (role.pricePerDay ?? null);
     useSmmStore.setState({
       inviteCtx: {
-        specialistId: activeSpecialist.id,
-        specialistName: activeSpecialist.name,
+        specialistId: sp.id,
+        specialistName: sp.name,
         eventId: ev.id,
         eventTitle: ev.title,
         roleId: role.id,
@@ -327,11 +348,16 @@ export default function SmmDashboard() {
         pricePerK: role.pricePerK ?? null,
         pricePerDay: role.pricePerDay ?? null,
         eventFormat: format,
-        estimate: role.pricePerK ?? null,
+        estimate,
       },
       applyCtx: null,
     });
     setPage('smm-invite');
+  };
+
+  const inviteFromCard = () => {
+    if (!activeSpecialist) return;
+    inviteFrom(activeSpecialist, pickedInviteEvent, pickedInviteRole);
   };
 
   // feed scroll → active card
@@ -360,7 +386,15 @@ export default function SmmDashboard() {
       else if (it.kind === 'post') void toggleBookmark('post', it.id);
       else void toggleBookmark('specialist', it.id);
     },
-    onOpenProfile: undefined,
+    onOpenProfile: () => {
+      // Tap the author on any card → THEIR profile window (their card + their
+      // published cards). Your own profile lives behind the top-panel avatar.
+      const target = it.kind === 'event' ? it.customer
+        : it.kind === 'post' ? it.specialist
+        : { id: it.id, name: it.name, image: it.image ?? null };
+      if (!target?.id || target.id === myId) return;
+      useSmmStore.setState({ profileUserId: target.id, topWindow: 'profile', openChatId: null });
+    },
     onChat: () => {
       if (it.kind === 'event') { if (it.customerId !== myId) void openDirectChat(it.customerId); }
       else if (it.kind === 'post') { if (it.specialistId !== myId) void openDirectChat(it.specialistId); }
@@ -407,6 +441,22 @@ export default function SmmDashboard() {
 
   // ── the first bottom bar (context action) ───────────────────────────────
   const barAction = (() => {
+    // The profile window: a customer invites the viewed specialist right from
+    // here (the same пригласить bar the specialist card carries in the
+    // публичная библиотека).
+    if (topWindow === 'profile') {
+      if (!isSpecialist && profileData && profileData.user.roles.length > 0) {
+        return {
+          label: t('smmInviteBtn'),
+          fn: () => inviteFrom(
+            { id: profileData.user.id, name: profileData.user.name, roles: profileData.user.roles },
+            pickedInviteEvent, pickedInviteRole,
+          ),
+          disabled: !pickedInviteEvent || !pickedInviteRole,
+        };
+      }
+      return null;
+    }
     if (topWindow !== 'none' || !activeItem) return null;
     if (editMode) {
       const canEdit = (activeItem.kind === 'post' && activeItem.specialistId === myId)
@@ -426,7 +476,8 @@ export default function SmmDashboard() {
   // ── window contents ─────────────────────────────────────────────────────
   const windowTitle = topWindow === 'bookmarks' ? t('smmTopBookmarks')
     : topWindow === 'chats' ? t('smmTopChats')
-    : topWindow === 'requests' ? t('smmRequestsMine') : null;
+    : topWindow === 'requests' ? t('smmRequestsMine')
+    : topWindow === 'profile' ? t('smmViewProfile') : null;
 
   const renderCard = (it: AnyItem, selected: boolean, variant: 'grid' | 'feed') => {
     const ctx = makeCtx(it, selected);
@@ -437,6 +488,73 @@ export default function SmmDashboard() {
 
   const renderMainWindow = () => {
     if (windowTitle) {
+      // ── the ОКНО ПРОФИЛЯ (opened by tapping an author on any card) ──
+      if (topWindow === 'profile') {
+        const spProfile: SmmSpecialistT | null = profileData && profileData.user.roles.length > 0
+          ? { id: profileData.user.id, name: profileData.user.name, image: profileData.user.image, rating: profileData.user.rating, orders: profileData.user.orders, roles: profileData.user.roles }
+          : null;
+        return (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="max-w-2xl mx-auto flex flex-col gap-3 px-3 sm:px-4 py-3">
+              {profileLoading && (
+                <p className="text-sm text-muted-foreground flex items-center gap-2 justify-center py-10"><Loader2 className="w-4 h-4 animate-spin" /> {t('loading')}</p>
+              )}
+              {!profileLoading && !profileData && <p className="text-sm text-muted-foreground text-center py-10">—</p>}
+              {profileData && (
+                <>
+                  {spProfile ? (
+                    /* the specialist profile leads with THEIR card — the very
+                    same card the публичная библиотека shows (rating, orders,
+                    roles+prices, the event/role pickers) */
+                    <SmmSpecialistCardView
+                      sp={spProfile}
+                      variant="feed"
+                      ctx={makeCtx({ kind: 'specialist', ...spProfile }, true)}
+                    />
+                  ) : (
+                    /* a customer (or a role-less specialist) — the identity
+                    card in the same style: the standard strip + «написать» */
+                    <div className="rounded-2xl border bg-white p-2 sm:p-3 lg:p-4 flex flex-col gap-2">
+                      <CreatorStrip
+                        name={profileData.user.name}
+                        creatorId={profileData.user.id}
+                        image={profileData.user.image}
+                        bookmarked={bookmarkOf('specialist', profileData.user.id)}
+                        onToggleBookmark={() => void toggleBookmark('specialist', profileData.user.id)}
+                        addLabel={t('bookmarkAdd')} removeLabel={t('bookmarkRemove')}
+                        addShort={t('bookmarkAddShort')} removeShort={t('bookmarkRemoveShort')}
+                        openLabel={t('openProfile')}
+                      />
+                      {profileData.user.id !== myId && (
+                        <Button variant="outline" className="h-8 rounded-full border-black text-[11px] sm:text-xs justify-start gap-1" onClick={() => void openDirectChat(profileData.user.id)}>
+                          <MessageCircle className="size-3.5 shrink-0" /> <span>{t('smmProfileOpenChats')}</span>
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  {/* their published cards — the same cards with the same
+                  capabilities (share / chat / bookmark / profile) */}
+                  {profileData.posts.length > 0 && (
+                    <>
+                      <h3 className="text-sm font-bold text-muted-foreground px-1">{t('smmPosts')}</h3>
+                      {profileData.posts.map(p => renderCard({ kind: 'post', ...p } as AnyItem, false, 'feed'))}
+                    </>
+                  )}
+                  {profileData.events.length > 0 && (
+                    <>
+                      <h3 className="text-sm font-bold text-muted-foreground px-1">{t('smmEvents')}</h3>
+                      {profileData.events.map(e => renderCard({ kind: 'event', ...e } as AnyItem, false, 'feed'))}
+                    </>
+                  )}
+                  {profileData.posts.length === 0 && profileData.events.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-6">{t('smmProfileNothing')}</p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        );
+      }
       // ── the закладки / чаты / запросы window ──
       if (topWindow === 'bookmarks') {
         return (
@@ -446,19 +564,19 @@ export default function SmmDashboard() {
               {bookmarks.map(b => {
                 if (b.targetType === 'event' && b.event) return (
                   <BookmarkRow key={b.id} kind="event" label={b.event.title} sub={b.event.customer?.name || ''}
-                    onOpen={() => { gotoLibrary(true); useSmmStore.setState({ smmMode: 'customer' }); }}
+                    onOpen={() => { if (b.event?.customerId) useSmmStore.setState({ profileUserId: b.event.customerId, topWindow: 'profile', openChatId: null }); }}
                     onRemove={async () => { await api.removeSmmBookmark('event', b.targetId); void loadLists(); }}
                     t={t} />
                 );
                 if (b.targetType === 'specialist' && b.specialist) return (
                   <BookmarkRow key={b.id} kind="specialist" label={b.specialist.name} sub={`${t('smmRating')}: ${b.specialist.rating > 0 ? b.specialist.rating.toFixed(1) : '—'}`}
-                    onOpen={() => { gotoLibrary(true); useSmmStore.setState({ smmMode: 'customer' }); }}
+                    onOpen={() => useSmmStore.setState({ profileUserId: b.targetId, topWindow: 'profile', openChatId: null })}
                     onRemove={async () => { await api.removeSmmBookmark('specialist', b.targetId); void loadLists(); }}
                     t={t} />
                 );
                 if (b.targetType === 'post' && b.post) return (
                   <BookmarkRow key={b.id} kind="post" label={b.post.role?.name || t('smmPost')} sub={b.post.specialist?.name || ''}
-                    onOpen={() => { gotoLibrary(false); useSmmStore.setState({ smmMode: 'specialist' }); }}
+                    onOpen={() => { if (b.post?.specialistId) useSmmStore.setState({ profileUserId: b.post.specialistId, topWindow: 'profile', openChatId: null }); }}
                     onRemove={async () => { await api.removeSmmBookmark('post', b.targetId); void loadLists(); }}
                     t={t} />
                 );
@@ -612,7 +730,7 @@ export default function SmmDashboard() {
     );
   };
 
-  const plusHidden = topWindow === 'bookmarks';
+  const plusHidden = topWindow === 'bookmarks' || topWindow === 'profile';
   const tw = topWindow as string; // widened read for the JSX comparisons
 
   return (

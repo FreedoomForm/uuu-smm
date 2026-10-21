@@ -321,6 +321,62 @@ export async function listSpecialists() {
   return { items };
 }
 
+// ── PROFILE — the author window opened by tapping a card's author strip ─────
+
+// Everything the profile window needs in ONE fetch: the identity (with the
+// specialist's 4 params when they have roles) + their posts + their PUBLIC
+// events (a customer's personal мероприятия never leak through the profile).
+export async function getSmmProfile(viewerId: string, targetUserId: string) {
+  if (!targetUserId) throw ApiError.badRequest("userId required");
+  const user = await db.user.findUnique({
+    where: { id: targetUserId },
+    select: {
+      id: true, name: true, image: true, smmRating: true, smmRole: true,
+      smmRoles: {
+        where: { ownerId: targetUserId },
+        select: { id: true, name: true, pricePerK: true, pricePerDay: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+  if (!user) throw ApiError.notFound("User not found");
+  const [apps, invites, posts, events] = await Promise.all([
+    db.smmApplication.count({ where: { specialistId: targetUserId, status: "accepted" } }),
+    db.smmInvitation.count({ where: { specialistId: targetUserId, status: "accepted" } }),
+    db.smmPost.findMany({
+      where: { specialistId: targetUserId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: {
+        role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+        specialist: publicUser,
+      },
+    }),
+    db.smmEvent.findMany({
+      where: { customerId: targetUserId, isPublic: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: eventInclude,
+    }),
+  ]);
+  const withTests = await Promise.all(
+    events.map(async (e) => ({ ...e, tests: await eventTests(e.testIds) }))
+  );
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      image: user.image,
+      rating: user.smmRating,
+      orders: apps + invites,
+      mode: user.smmRole,
+      roles: user.smmRoles,
+    },
+    posts,
+    events: withTests,
+  };
+}
+
 // ── ROLES (my own, for the post editor) ─────────────────────────────────────
 
 export async function listMyRoles(userId: string) {
@@ -363,6 +419,9 @@ export async function createApplication(
   userName: string,
   body: { eventId: string; roleId: string; score?: number; totalQuestions?: number }
 ) {
+  // 400 (not a raw Prisma 500) when ids are missing — the API never lets a
+  // malformed payload reach the database.
+  if (!body?.eventId || !body?.roleId) throw ApiError.badRequest("eventId and roleId required");
   const event = await db.smmEvent.findUnique({ where: { id: body.eventId } });
   if (!event) throw ApiError.notFound("Event not found");
   const role = await db.smmRole.findUnique({ where: { id: body.roleId } });
@@ -429,6 +488,8 @@ export async function createInvitation(
   userName: string,
   body: { specialistId: string; eventId: string; roleId: string; estimate?: number | null }
 ) {
+  // 400 (not a raw Prisma 500) when ids are missing.
+  if (!body?.specialistId || !body?.eventId || !body?.roleId) throw ApiError.badRequest("specialistId, eventId and roleId required");
   const event = await db.smmEvent.findUnique({ where: { id: body.eventId } });
   if (!event) throw ApiError.notFound("Event not found");
   if (event.customerId !== userId) throw ApiError.forbidden("Not your event");

@@ -451,6 +451,8 @@ const en: Dict = {
   smmSearchPh: 'Search events, posts, specialists…',
   smmShareCopied: 'Link copied',
   smmViewProfile: 'Profile',
+  smmProfileNothing: 'Nothing published yet',
+  smmProfileOpenChats: 'Write a message',
   smmAuthor: 'Author',
 };
 
@@ -868,6 +870,8 @@ const ru: Dict = {
   smmSearchPh: 'Поиск мероприятий, постов, специалистов…',
   smmShareCopied: 'Ссылка скопирована',
   smmViewProfile: 'Профиль',
+  smmProfileNothing: 'Пока ничего не опубликовано',
+  smmProfileOpenChats: 'Написать сообщение',
   smmAuthor: 'Автор',
 };
 
@@ -1283,6 +1287,8 @@ const uz: Dict = {
   smmSearchPh: 'Tadbirlar, postlar, mutaxassislar qidirish…',
   smmShareCopied: 'Havola nusxalandi',
   smmViewProfile: 'Profil',
+  smmProfileNothing: 'Hali hech narsa joylanmagan',
+  smmProfileOpenChats: 'Xabar yozish',
   smmAuthor: 'Muallif',
 };
 

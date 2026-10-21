@@ -253,6 +253,11 @@ export const api = {
     apiFetch('/smm/roles') as Promise<{ items: import('@/lib/app-types').SmmRoleT[] }>,
   deleteRole: (id: string) => apiFetch(`/smm/roles/${id}`, { method: 'DELETE' }),
 
+  // Профиль (the author window opened from any card's author strip):
+  // identity + the specialist's 4 params + their posts + their public events.
+  getSmmProfile: (userId: string) =>
+    apiFetch(`/smm/profile?userId=${encodeURIComponent(userId)}`) as Promise<import('@/lib/app-types').SmmProfileT>,
+
   // Заявки (the specialist applies to an event with one of their roles)
   getApplications: () =>
     apiFetch('/smm/applications') as Promise<{ items: import('@/lib/app-types').SmmRequestRowT[] }>,

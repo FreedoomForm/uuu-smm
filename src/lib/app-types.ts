@@ -206,6 +206,22 @@ export interface SmmSpecialistT {
   roles: SmmRoleT[];
 }
 
+// ОКНО ПРОФИЛЯ (opened by tapping an author on any SMM card): the identity
+// (specialist 4 params when roles exist) + their posts + their public events.
+export interface SmmProfileT {
+  user: {
+    id: string;
+    name: string;
+    image?: string | null;
+    rating: number;
+    orders: number;
+    mode?: string | null;
+    roles: SmmRoleT[];
+  };
+  posts: SmmPostT[];
+  events: SmmEventT[];
+}
+
 // A row of «Мои запросы»: a sent заявка or приглашение
 export interface SmmRequestRowT {
   id: string;

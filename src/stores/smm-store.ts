@@ -10,8 +10,9 @@
 import { makeStore } from '@/stores/make-store';
 
 export type SmmMode = 'specialist' | 'customer';
-// The main-window mode the top-panel buttons switch to
-export type SmmTopWindow = 'none' | 'bookmarks' | 'chats' | 'requests';
+// The main-window mode the top-panel buttons switch to ('profile' = the
+// author window opened by tapping the author strip on any card)
+export type SmmTopWindow = 'none' | 'bookmarks' | 'chats' | 'requests' | 'profile';
 
 // The event whose qualification tests the specialist is taking (заявка flow)
 export interface SmmApplyCtx {
@@ -60,6 +61,8 @@ interface SmmData {
   openChatId: string | null;
   // The post/event being edited (null = create mode)
   editingId: string | null;
+  // The author whose profile window is open (topWindow === 'profile')
+  profileUserId: string | null;
 }
 
 const INITIAL: SmmData = {
@@ -75,6 +78,7 @@ const INITIAL: SmmData = {
   refreshNonce: 0,
   openChatId: null,
   editingId: null,
+  profileUserId: null,
   applyResults: {},
 };
 
