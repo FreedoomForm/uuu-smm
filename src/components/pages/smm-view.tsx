@@ -152,6 +152,10 @@ export default function SmmDashboard() {
   // target built at the card's «Файлы» click — the same cache the tests'
   // dashFilesCountRef keeps)
   const filesItemRef = useRef<Record<string, SmmFilesTarget>>({});
+  // The last specialist context for the «пригласить» button (set on a
+  // specialist card open / profile window load) — the button keeps its
+  // invite target even after the view changes to events/chats/etc.
+  const lastSpRef = useRef<{ id: string; name: string; roles: SmmRoleT[] } | null>(null);
   // EVERY card ever rendered (dashboard feed/grid, profile window, bookmarks)
   // lands here — «Изменить» must know own-vs-somebody's from ANY surface,
   // not only from the current dashboard list (the profile-window cards are
@@ -208,6 +212,19 @@ export default function SmmDashboard() {
 
   useEffect(() => { void loadLists(); }, [loadLists, refreshNonce]);
 
+  // The invite EVENT pick self-heals: as soon as the customer's own events
+  // are in (they load async), the pick defaults to the first one — and
+  // re-heals whenever the pick points nowhere (event deleted, stale state
+  // from an old session). The «пригласить» button must never sit disabled
+  // while the user HAS events.
+  useEffect(() => {
+    if (myEvents.length === 0) return;
+    const cur = useSmmStore.getState().pickedInviteEvent;
+    if (!cur || !myEvents.some(e => e.id === cur)) {
+      useSmmStore.setState({ pickedInviteEvent: myEvents[0].id });
+    }
+  }, [myEvents]);
+
   const loadRequests = useCallback(async () => {
     if (!myId) return;
     try {
@@ -246,10 +263,23 @@ export default function SmmDashboard() {
     let alive = true;
     setProfileLoading(true);
     api.getSmmProfile(profileUserId)
-      .then(r => { if (alive) setProfileData(r); })
+      .then(r => {
+        if (!alive) return;
+        setProfileData(r);
+        // a customer viewing a specialist: heal the invite ROLE pick (it must
+        // be one of THIS user's roles) and remember them as the invite target
+        if (!isSpecialist && r.user.roles.length > 0) {
+          const curRole = useSmmStore.getState().pickedInviteRole;
+          if (!curRole || !r.user.roles.some(x => x.id === curRole)) {
+            useSmmStore.setState({ pickedInviteRole: r.user.roles[0].id });
+          }
+          lastSpRef.current = { id: r.user.id, name: r.user.name, roles: r.user.roles };
+        }
+      })
       .catch(() => { if (alive) setProfileData(null); })
       .finally(() => { if (alive) setProfileLoading(false); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topWindow, profileUserId, refreshNonce]);
 
   // open chat messages + poll
@@ -549,9 +579,12 @@ export default function SmmDashboard() {
   // Приглашение: примерная сумма depends on the EVENT's format — онлайн =
   // цена за 1000 просмотров, оффлайн = цена за день (8 часов).
   const inviteFrom = (sp: { id: string; name: string; roles: SmmRoleT[] }, pickedEventId: string | null, pickedRoleId: string | null) => {
-    if (!sp || !pickedEventId || !pickedRoleId) return;
-    const role = sp.roles.find(r => r.id === pickedRoleId);
-    const ev = myEvents.find(e => e.id === pickedEventId);
+    if (!sp) return;
+    // the picks self-heal: a stale id (deleted event/role, an old pick from
+    // a previous session) falls back to the first own event / first
+    // specialist role — the button never resolves into a silent no-op
+    const role = sp.roles.find(r => r.id === pickedRoleId) || sp.roles[0];
+    const ev = myEvents.find(e => e.id === pickedEventId) || myEvents[0];
     if (!role || !ev) return;
     const format: 'online' | 'offline' = ev.format === 'offline' ? 'offline' : 'online';
     const estimate = format === 'online' ? (role.pricePerK ?? null) : (role.pricePerDay ?? null);
@@ -573,9 +606,28 @@ export default function SmmDashboard() {
     setPage('smm-invite');
   };
 
-  const inviteFromCard = () => {
-    if (!activeSpecialist) return;
-    inviteFrom(activeSpecialist, pickedInviteEvent, pickedInviteRole);
+  // The invite button's single entry — NEVER dead: every «nothing to pick»
+  // case leads somewhere useful instead of sitting disabled.
+  const inviteClick = (sp: { id: string; name: string; roles: SmmRoleT[] } | null) => {
+    if (!sp) {
+      // no specialist in sight — the public library is where they live
+      toast(t('smmInvitePickSpecialist'));
+      gotoLibrary(true);
+      return;
+    }
+    if (!sp.roles || sp.roles.length === 0) {
+      // the invite needs a role only the specialist can create
+      toast(t('smmInviteNoRoles'));
+      return;
+    }
+    if (myEvents.length === 0) {
+      // no event to invite to — the event editor is one tap away
+      toast(t('smmInviteNoEvent'));
+      useSmmStore.setState({ editingId: null });
+      setPage('smm-event-editor');
+      return;
+    }
+    inviteFrom(sp, pickedInviteEvent, pickedInviteRole);
   };
 
   // feed scroll → active card
@@ -798,10 +850,13 @@ export default function SmmDashboard() {
         if (!smmNow().pickedApplyRole) useSmmStore.setState({ pickedApplyRole: myRoles[0]?.id || null });
       }
       if (it.kind === 'specialist') {
-        if (!smmNow().pickedInviteRole) useSmmStore.setState({ pickedInviteRole: it.roles[0]?.id || null });
-        // The invite bar must never open dead: default the event to the first
-        // own one (the invite screen shows the choice before confirming).
-        if (!smmNow().pickedInviteEvent) useSmmStore.setState({ pickedInviteEvent: myEvents[0]?.id || null });
+        // heal the picks: the role must be one of THIS specialist's, the
+        // event — one of the customer's own (stale ids re-default)
+        const curRole = smmNow().pickedInviteRole;
+        if (!curRole || !(it.roles || []).some(r => r.id === curRole)) useSmmStore.setState({ pickedInviteRole: it.roles[0]?.id || null });
+        const curEv = smmNow().pickedInviteEvent;
+        if (!curEv || !myEvents.some(e => e.id === curEv)) useSmmStore.setState({ pickedInviteEvent: myEvents[0]?.id || null });
+        lastSpRef.current = { id: it.id, name: it.name, roles: it.roles };
       }
     },
     myRoles,
@@ -839,42 +894,53 @@ export default function SmmDashboard() {
   };
 
   // ── the first bottom bar (context action) ───────────────────────────────
+  // «Пригласить на мероприятие» ALWAYS stands in the bottom panel for the
+  // customer — on every surface (main area, profile, bookmarks, chats,
+  // requests, floating panels) — and it is NEVER a dead button: with no
+  // specialist in sight it opens the public library (where specialist cards
+  // live), with no own events it leads to the event editor, with a role-less
+  // specialist it says so. The specialist mode keeps the contextual
+  // «Подать заявку» / «Изменить» behavior.
   const barAction = (() => {
-    // The profile window: a customer invites the viewed specialist right from
-    // here (the same пригласить bar the specialist card carries in the
-    // публичная библиотека).
+    // the profile window: a customer invites the viewed specialist right
+    // from here (the same пригласить bar the specialist card carries)
     if (topWindow === 'profile') {
-      if (!isSpecialist && profileData && profileData.user.roles.length > 0) {
-        return {
-          label: t('smmInviteBtn'),
-          fn: () => inviteFrom(
-            { id: profileData.user.id, name: profileData.user.name, roles: profileData.user.roles },
-            pickedInviteEvent, pickedInviteRole,
-          ),
-          disabled: !pickedInviteEvent || !pickedInviteRole,
-        };
+      if (isSpecialist) return null;
+      if (profileData && profileData.user.roles.length > 0) {
+        const profileSp = { id: profileData.user.id, name: profileData.user.name, roles: profileData.user.roles };
+        return { label: t('smmInviteBtn'), fn: () => inviteClick(profileSp) };
+      }
+      return { label: t('smmInviteBtn'), fn: () => toast(t('smmInviteNoRoles')) };
+    }
+    // the files / card-chat windows are floating PANELS now — the main area
+    // (and the bar with it) stays visible while they are open; bookmarks /
+    // chats / requests windows keep the bar standing too («всегда в панели»)
+    const mainVisible = topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat';
+    if (!mainVisible && topWindow !== 'bookmarks' && topWindow !== 'chats' && topWindow !== 'requests') return null;
+    if (editMode) {
+      const canEdit = (activeItem?.kind === 'post' && activeItem.specialistId === myId)
+        || (activeItem?.kind === 'event' && activeItem.customerId === myId);
+      if (canEdit && activeItem) return { label: activeItem.kind === 'post' ? t('smmPostEdit') : t('smmEventEdit'), fn: startEditActive };
+      return null;
+    }
+    if (isSpecialist) {
+      if (mainVisible && activeItem?.kind === 'event' && activeEvent && activeEvent.customerId !== myId) {
+        // Disabled only in the transient state «roles exist but none picked»
+        // (the picker defaults the first role instantly, so it never sticks);
+        // role-less specialists get a WORKING button that opens the post editor.
+        return { label: t('smmApplyBtn'), fn: applyFromCard, disabled: myRoles.length > 0 && !pickedApplyRole };
       }
       return null;
     }
-    // the files / card-chat windows are floating PANELS now — the main area
-    // (and the first bar with it) stays visible while they are open
-    if (!(topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat') || !activeItem) return null;
-    if (editMode) {
-      const canEdit = (activeItem.kind === 'post' && activeItem.specialistId === myId)
-        || (activeItem.kind === 'event' && activeItem.customerId === myId);
-      if (canEdit) return { label: activeItem.kind === 'post' ? t('smmPostEdit') : t('smmEventEdit'), fn: startEditActive };
-      return null;
-    }
-    if (isSpecialist && activeItem.kind === 'event' && activeEvent && activeEvent.customerId !== myId) {
-      // Disabled only in the transient state «roles exist but none picked»
-      // (the picker defaults the first role instantly, so it never sticks);
-      // role-less specialists get a WORKING button that opens the post editor.
-      return { label: t('smmApplyBtn'), fn: applyFromCard, disabled: myRoles.length > 0 && !pickedApplyRole };
-    }
-    if (!isSpecialist && activeItem.kind === 'specialist') {
-      return { label: t('smmInviteBtn'), fn: inviteFromCard, disabled: !pickedInviteEvent || !pickedInviteRole };
-    }
-    return null;
+    // CUSTOMER MODE — the invite button always stands: the active specialist
+    // card, the seen one (any surface), or the last viewed specialist —
+    // otherwise the button leads to the public library.
+    const seen = activeCardId ? seenItemsRef.current[activeCardId] : null;
+    const sp = activeSpecialist
+      || (seen && seen.kind === 'specialist' ? seen : null)
+      || lastSpRef.current
+      || null;
+    return { label: t('smmInviteBtn'), fn: () => inviteClick(sp) };
   })();
 
   // ── window contents ─────────────────────────────────────────────────────
