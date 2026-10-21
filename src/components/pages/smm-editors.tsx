@@ -11,9 +11,14 @@
 //
 //   SmmPostEditor — the specialist's post card: ONE role (existing or new
 //     with the two prices) + video/photo collection + description.
+//
+// The FORM BODIES (SmmEventForm / SmmPostForm) are shared components: the
+// full-page editors wrap them in the EditorShell, and the card's EDIT WINDOW
+// (the switcher's «Изменить» option — the SAME window the test cards open)
+// embeds them in a resizable sheet with the Save button in its footer.
 // ---------------------------------------------------------------------------
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +29,7 @@ import { api } from '@/lib/api';
 import { tUI } from '@/lib/i18n';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
-import { useSmmStore, smmNow } from '@/stores/smm-store';
+import { useSmmStore } from '@/stores/smm-store';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Film, Image as ImgIcon, Loader2, MapPin, Paperclip, Plus, Trash2 } from 'lucide-react';
 import LangButton from '@/components/lang-button';
 import { Collapse } from '@/components/motion';
@@ -83,6 +88,13 @@ function useT() {
   return { t, lang, cycleLang };
 }
 
+// The toast helper — the same lightweight inline toast the whole SMM page
+// speaks (the SmmToast listener renders it on the dashboard; the editor
+// pages keep the same event contract).
+const smmToast = (msg: string) => {
+  try { window.dispatchEvent(new CustomEvent('smm-toast', { detail: msg })); } catch { /* noop */ }
+};
+
 // ── THE «ПРИКРЕПЛЁННЫЕ ФАЙЛЫ» SECTION OF EVERY CREATE/EDIT PAGE ───────────
 // The same collapsed-to-one-line card the test editor keeps: Paperclip +
 // «Прикреплённые файлы (N)» header, the hint line and the SAME
@@ -118,12 +130,23 @@ function EditorFilesSection({ items, onChange, t }: {
   );
 }
 
-// ── EVENT EDITOR ────────────────────────────────────────────────────────────
+// ── THE SHARED FORM HANDLES ─────────────────────────────────────────────────
+// The edit window (and the EditorShell footer) triggers the save through the
+// ref: `formRef.current?.save()`.
 
-export function SmmEventEditor() {
-  const { t, lang, cycleLang } = useT();
-  const setPage = useNavStore(s => s.setPage);
-  const editingId = useSmmStore(s => s.editingId);
+export interface SmmFormHandle {
+  save: () => void;
+}
+
+// ── EVENT FORM (the body of the event editor) ───────────────────────────────
+
+export const SmmEventForm = React.forwardRef<SmmFormHandle, {
+  editingId: string | null; // null = create
+  onSaved: (saved: SmmEventT) => void; // the save succeeded — the parent closes/navigates
+  onFail: () => void; // the card is not mine / gone — the parent closes
+  onSaving?: (saving: boolean) => void;
+}>(function SmmEventForm({ editingId, onSaved, onFail, onSaving }, ref) {
+  const { t } = useT();
   const myId = useSessionStore(s => s.user?.id || s.hydratedUser?.id || '');
 
   const [title, setTitle] = useState('');
@@ -137,6 +160,10 @@ export function SmmEventEditor() {
   const [myTests, setMyTests] = useState<{ id: string; title: string; q: number }[]>([]);
   const [coverColor, setCoverColor] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(true);
+  // Version rule (the SAME one the tests keep): a VERSION (a copy of somebody
+  // else's мероприятие) can never be public — the editor hides the publish
+  // selector for it (the server coerces the flag anyway).
+  const [isVersion, setIsVersion] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -151,17 +178,18 @@ export function SmmEventEditor() {
       setLoading(true);
       api.getEvent(editingId).then((r: any) => {
         const e: SmmEventT = r.event;
-        if (e.customerId !== myId) { setPage('dashboard'); return; }
+        if (e.customerId !== myId) { onFail(); return; }
         setTitle(e.title); setSummary(e.summary || '');
         setFormat(e.format || 'online'); setPlatform(e.platform || 'instagram');
         setLocation(e.location || ''); setTimeAt(e.timeAt || '');
         setTestIds(e.testIds || []); setAttachments(((e as SmmEventT).attachments || []) as AttachmentItem[]);
         setCoverColor(e.coverColor || null);
+        setIsVersion(!!e.parentId);
         setIsPublic(e.isPublic !== false);
-      }).catch(() => setPage('dashboard')).finally(() => setLoading(false));
+      }).catch(() => onFail()).finally(() => setLoading(false));
     } else {
       setTitle(''); setSummary(''); setFormat('online'); setPlatform('instagram');
-      setLocation(''); setTimeAt(''); setTestIds([]); setAttachments([]); setCoverColor(null); setIsPublic(true);
+      setLocation(''); setTimeAt(''); setTestIds([]); setAttachments([]); setCoverColor(null); setIsPublic(true); setIsVersion(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, myId]);
@@ -171,27 +199,26 @@ export function SmmEventEditor() {
   };
 
   const save = async () => {
-    if (!title.trim()) { window.dispatchEvent(new CustomEvent('smm-toast', { detail: t('smmEventTitle') })); return; }
-    setSaving(true);
+    if (!title.trim()) { smmToast(t('smmEventTitle')); return; }
+    setSaving(true); onSaving?.(true);
     const payload = { title, summary, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, attachments, coverColor, isPublic };
     try {
-      if (editingId) await api.updateEvent(editingId, payload);
-      else await api.createEvent(payload);
-      window.dispatchEvent(new CustomEvent('smm-toast', { detail: t('smmEventSaved') }));
-      useSmmStore.setState((s: any) => ({ editingId: null, refreshNonce: (s.refreshNonce || 0) + 1 }));
-      setPage('dashboard');
+      const saved = editingId ? await api.updateEvent(editingId, payload) : await api.createEvent(payload);
+      smmToast(t('smmEventSaved'));
+      onSaved(saved as SmmEventT);
     } catch (e: any) {
-      window.dispatchEvent(new CustomEvent('smm-toast', { detail: e?.message || 'Error' }));
+      smmToast(e?.message || 'Error');
     } finally {
-      setSaving(false);
+      setSaving(false); onSaving?.(false);
     }
   };
+
+  useImperativeHandle(ref, () => ({ save }));
 
   const chip = (active: boolean) => `h-9 px-3 rounded-full border-2 text-xs sm:text-sm font-semibold transition-colors ${active ? 'bg-cta text-white border-cta' : 'bg-white border-black/20 hover:border-black'}`;
 
   return (
-    <EditorShell title={editingId ? t('smmEventEdit') : t('smmEventCreate')} onBack={() => { useSmmStore.setState({ editingId: null }); setPage('dashboard'); }}
-      lang={lang} cycleLang={cycleLang} saveLabel={editingId ? t('smmEventSaved') : t('smmEventCreate')} onSave={save} saving={saving} saveDisabled={!title.trim() || loading}>
+    <>
       <Card className="rounded-4xl border border-black bg-white">
         <CardContent className="p-4 flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
@@ -248,11 +275,14 @@ export function SmmEventEditor() {
               ))}
             </div>
           </div>
-          {/* public */}
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} className="w-4 h-4 accent-[#F97316]" />
-            <span className="text-sm font-semibold">{t('modeDiscover')} — {t('smmEvents')}</span>
-          </label>
+          {/* public — a VERSION can never be public (the test editor's rule:
+          the publish selector is hidden for versions) */}
+          {!isVersion && (
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} className="w-4 h-4 accent-[#F97316]" />
+              <span className="text-sm font-semibold">{t('modeDiscover')} — {t('smmEvents')}</span>
+            </label>
+          )}
         </CardContent>
       </Card>
 
@@ -261,9 +291,7 @@ export function SmmEventEditor() {
         <CardContent className="p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
             <Label className="text-sm font-bold">{t('smmEventTests')}</Label>
-            <Button size="sm" variant="outline" onClick={() => setPage('create-test')} className="h-8 rounded-full border-black text-xs">
-              <Plus className="size-3.5" /> {t('smmEventTestsCreate')}
-            </Button>
+            <EventTestCreateButton t={t} />
           </div>
           <p className="text-xs text-muted-foreground">{t('smmEventTestsHint')}</p>
           {myTests.length === 0 && <p className="text-xs text-muted-foreground">{t('smmEventTestsNone')}</p>}
@@ -283,16 +311,55 @@ export function SmmEventEditor() {
       {/* the «Прикреплённые файлы» section — the SAME one the test editor
       keeps, present on every creation and editing page */}
       <EditorFilesSection items={attachments} onChange={setAttachments} t={t} />
+    </>
+  );
+});
+
+// The «create a test» button inside the qualification picker (page editor
+// navigates to the test editor; kept out of the form to not re-render it).
+function EventTestCreateButton({ t }: { t: (key: string, vars?: Record<string, string | number>) => string }) {
+  const setPage = useNavStore(s => s.setPage);
+  return (
+    <Button size="sm" variant="outline" onClick={() => setPage('create-test')} className="h-8 rounded-full border-black text-xs">
+      <Plus className="size-3.5" /> {t('smmEventTestsCreate')}
+    </Button>
+  );
+}
+
+// ── EVENT PAGE EDITOR (the «+» create flow — the full page) ─────────────────
+
+export function SmmEventEditor() {
+  const { t, lang, cycleLang } = useT();
+  const setPage = useNavStore(s => s.setPage);
+  const editingId = useSmmStore(s => s.editingId);
+  const formRef = useRef<SmmFormHandle>(null);
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <EditorShell title={editingId ? t('smmEventEdit') : t('smmEventCreate')}
+      onBack={() => { useSmmStore.setState({ editingId: null }); setPage('dashboard'); }}
+      lang={lang} cycleLang={cycleLang}
+      saveLabel={editingId ? t('save') : t('smmEventCreate')} onSave={() => formRef.current?.save()} saving={saving}>
+      <SmmEventForm
+        ref={formRef}
+        editingId={editingId}
+        onSaving={setSaving}
+        onSaved={() => { useSmmStore.setState((s: any) => ({ editingId: null, refreshNonce: (s.refreshNonce || 0) + 1 })); setPage('dashboard'); }}
+        onFail={() => setPage('dashboard')}
+      />
     </EditorShell>
   );
 }
 
-// ── POST EDITOR ─────────────────────────────────────────────────────────────
+// ── POST FORM (the body of the post editor) ─────────────────────────────────
 
-export function SmmPostEditor() {
-  const { t, lang, cycleLang } = useT();
-  const setPage = useNavStore(s => s.setPage);
-  const editingId = useSmmStore(s => s.editingId);
+export const SmmPostForm = React.forwardRef<SmmFormHandle, {
+  editingId: string | null; // null = create
+  onSaved: (saved: SmmPostT) => void;
+  onFail: () => void;
+  onSaving?: (saving: boolean) => void;
+}>(function SmmPostForm({ editingId, onSaved, onFail, onSaving }, ref) {
+  const { t } = useT();
   const myId = useSessionStore(s => s.user?.id || s.hydratedUser?.id || '');
 
   const [roles, setRoles] = useState<{ id: string; name: string; pricePerK?: number | null; pricePerDay?: number | null }[]>([]);
@@ -314,7 +381,7 @@ export function SmmPostEditor() {
     if (editingId) {
       api.getPosts('mine').then((r: any) => {
         const post: SmmPostT | undefined = (r.items || []).find((p: SmmPostT) => p.id === editingId);
-        if (!post) { setPage('dashboard'); return; }
+        if (!post) { onFail(); return; }
         setDescription(post.description || '');
         setMedia((post.media || []) as SmmPostMedia[]);
         setAttachments((post.attachments || []) as AttachmentItem[]);
@@ -325,7 +392,7 @@ export function SmmPostEditor() {
           setPricePerK(post.role.pricePerK != null ? String(post.role.pricePerK) : '');
           setPricePerDay(post.role.pricePerDay != null ? String(post.role.pricePerDay) : '');
         }
-      }).catch(() => setPage('dashboard'));
+      }).catch(() => onFail());
     } else {
       setDescription(''); setMedia([]); setAttachments([]); setCoverColor(null);
       setRoleId(''); setNewRoleName(''); setPricePerK(''); setPricePerDay('');
@@ -351,7 +418,7 @@ export function SmmPostEditor() {
       const isVideo = (file.type || '').startsWith('video');
       setMedia(prev => [...prev, { url: j.url, type: isVideo ? 'video' : 'image', title: file.name }]);
     } catch (e: any) {
-      window.dispatchEvent(new CustomEvent('smm-toast', { detail: e?.message || 'Error' }));
+      smmToast(e?.message || 'Error');
     } finally {
       setUploading(false);
     }
@@ -359,29 +426,26 @@ export function SmmPostEditor() {
 
   const save = async () => {
     const name = newRoleName.trim();
-    if (!name) { window.dispatchEvent(new CustomEvent('smm-toast', { detail: t('smmRoleName') })); return; }
+    if (!name) { smmToast(t('smmRoleName')); return; }
     const role = { name, pricePerK: pricePerK.trim() || null, pricePerDay: pricePerDay.trim() || null };
-    setSaving(true);
+    setSaving(true); onSaving?.(true);
     try {
-      if (editingId) {
-        await api.updatePost(editingId, { role, description, media, attachments, coverColor });
-      } else {
-        await api.createPost({ roleId: roleId || undefined, role, description, media, attachments, coverColor });
-      }
-      window.dispatchEvent(new CustomEvent('smm-toast', { detail: t('smmPostSaved') }));
-      useSmmStore.setState((s: any) => ({ editingId: null, refreshNonce: (s.refreshNonce || 0) + 1 }));
-      setPage('dashboard');
+      const saved = editingId
+        ? await api.updatePost(editingId, { role, description, media, attachments, coverColor })
+        : await api.createPost({ roleId: roleId || undefined, role, description, media, attachments, coverColor });
+      smmToast(t('smmPostSaved'));
+      onSaved(saved as SmmPostT);
     } catch (e: any) {
-      window.dispatchEvent(new CustomEvent('smm-toast', { detail: e?.message === 'This role already has a post' ? t('smmPostRoleTaken') : (e?.message || 'Error') }));
+      smmToast(e?.message === 'This role already has a post' ? t('smmPostRoleTaken') : (e?.message || 'Error'));
     } finally {
-      setSaving(false);
+      setSaving(false); onSaving?.(false);
     }
   };
 
-  return (
-    <EditorShell title={editingId ? t('smmPostEdit') : t('smmPostCreate')} onBack={() => { useSmmStore.setState({ editingId: null }); setPage('dashboard'); }}
-      lang={lang} cycleLang={cycleLang} saveLabel={editingId ? t('smmPostSaved') : t('smmPostCreate')} onSave={save} saving={saving} saveDisabled={!newRoleName.trim()}>
+  useImperativeHandle(ref, () => ({ save }));
 
+  return (
+    <>
       {/* role + prices */}
       <Card className="rounded-4xl border border-black bg-white">
         <CardContent className="p-4 flex flex-col gap-3">
@@ -464,6 +528,31 @@ export function SmmPostEditor() {
       {/* the «Прикреплённые файлы» section — the SAME one the test editor
       keeps, present on every creation and editing page */}
       <EditorFilesSection items={attachments} onChange={setAttachments} t={t} />
+    </>
+  );
+});
+
+// ── POST PAGE EDITOR (the «+» create flow — the full page) ──────────────────
+
+export function SmmPostEditor() {
+  const { t, lang, cycleLang } = useT();
+  const setPage = useNavStore(s => s.setPage);
+  const editingId = useSmmStore(s => s.editingId);
+  const formRef = useRef<SmmFormHandle>(null);
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <EditorShell title={editingId ? t('smmPostEdit') : t('smmPostCreate')}
+      onBack={() => { useSmmStore.setState({ editingId: null }); setPage('dashboard'); }}
+      lang={lang} cycleLang={cycleLang}
+      saveLabel={editingId ? t('save') : t('smmPostCreate')} onSave={() => formRef.current?.save()} saving={saving}>
+      <SmmPostForm
+        ref={formRef}
+        editingId={editingId}
+        onSaving={setSaving}
+        onSaved={() => { useSmmStore.setState((s: any) => ({ editingId: null, refreshNonce: (s.refreshNonce || 0) + 1 })); setPage('dashboard'); }}
+        onFail={() => setPage('dashboard')}
+      />
     </EditorShell>
   );
 }

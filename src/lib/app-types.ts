@@ -172,6 +172,10 @@ export interface SmmPostT {
   attachments?: SmmAttachmentT[] | null;
   coverColor?: string | null;
   coverIcon?: string | null;
+  // version linkage: «Изменить» on somebody else's post creates a private
+  // VERSION of the original (parentId = the source) in MY library
+  parentId?: string | null;
+  versionName?: string | null;
   createdAt: string;
   role?: { id: string; name: string; pricePerK?: number | null; pricePerDay?: number | null } | null;
   specialist?: { id: string; name: string; image?: string | null } | null;
@@ -193,6 +197,11 @@ export interface SmmEventT {
   coverColor?: string | null;
   coverIcon?: string | null;
   isPublic: boolean;
+  // version linkage: «Изменить» on somebody else's мероприятие creates a
+  // private VERSION of the original (parentId = the source) in MY library —
+  // it lands in the личная библиотека, never in the community feed
+  parentId?: string | null;
+  versionName?: string | null;
   createdAt: string;
   customer?: { id: string; name: string; image?: string | null } | null;
   tests?: { id: string; title: string; _count?: { questions: number } }[];

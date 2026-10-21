@@ -205,7 +205,10 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
           <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
         </Button>
-        {own && (
+        {/* The Public level (the own test cards keep it) — a VERSION (a copy
+        of somebody's мероприятие) never wears it: like the tests, a version
+        can never be made public (the server coerces the flag too). */}
+        {own && !event.parentId && (
           <Button size="sm" variant="outline" onClick={ctx.onPublic} title={t('makePublic')} className={LADDER_BTN}>
             <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
           </Button>

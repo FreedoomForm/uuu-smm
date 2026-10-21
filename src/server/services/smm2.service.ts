@@ -218,6 +218,47 @@ export async function deletePost(userId: string, id: string) {
   return { ok: true };
 }
 
+// ── VERSION COPY («Изменить» on somebody else's пост) ───────────────────────
+// The SAME rule the tests keep: the copy is a private VERSION of the original
+// (parentId = the source) in the copier's personal library, never public. The
+// copier gets THEIR OWN role with the source's name + prices (the one-post-
+// per-role rule applies to it), media and attached files ride along.
+export async function copyPost(userId: string, id: string) {
+  const source = await db.smmPost.findUnique({
+    where: { id },
+    include: { role: { select: { name: true, pricePerK: true, pricePerDay: true } } },
+  });
+  if (!source) throw ApiError.notFound("Post not found");
+  if (source.specialistId === userId) {
+    throw ApiError.badRequest("Own post is edited in place");
+  }
+  const role = await upsertRoleForPost(userId, undefined, {
+    name: source.role.name,
+    pricePerK: source.role.pricePerK ?? undefined,
+    pricePerDay: source.role.pricePerDay ?? undefined,
+  });
+  const taken = await db.smmPost.findUnique({ where: { roleId: role.id } });
+  if (taken) throw ApiError.conflict("This role already has a post");
+  const copy = await db.smmPost.create({
+    data: {
+      specialistId: userId,
+      roleId: role.id,
+      description: source.description,
+      media: (source.media as any) ?? undefined,
+      attachments: (source.attachments as any) ?? undefined,
+      coverColor: source.coverColor,
+      coverIcon: source.coverIcon,
+      isPublic: false, // a VERSION never appears in the community library
+      parentId: source.id,
+    },
+    include: {
+      role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+      specialist: publicUser,
+    },
+  });
+  return copy;
+}
+
 // ── EVENTS ──────────────────────────────────────────────────────────────────
 
 const eventInclude = {
@@ -295,6 +336,10 @@ export async function updateEvent(userId: string, id: string, body: Record<strin
   if (!event) throw ApiError.notFound("Event not found");
   if (event.customerId !== userId) throw ApiError.forbidden("Not your event");
   const data = eventPayload(userId, body, false);
+  // Version rule (the SAME one the tests keep): a VERSION (a copy of
+  // somebody's мероприятие) is NEVER public — the flag is silently coerced
+  // so a stray editor toggle can never leak a version into the public feed.
+  if (event.parentId) data.isPublic = false;
   const updated = await db.smmEvent.update({ where: { id }, data, include: eventInclude });
   return { ...updated, tests: await eventTests(updated.testIds) };
 }
@@ -305,6 +350,45 @@ export async function deleteEvent(userId: string, id: string) {
   if (event.customerId !== userId) throw ApiError.forbidden("Not your event");
   await db.smmEvent.delete({ where: { id } });
   return { ok: true };
+}
+
+// ── VERSION COPY («Изменить» on somebody else's мероприятие) ────────────────
+// The SAME rule the tests keep (tests.service.copyTest): somebody else's card
+// is NEVER edited in place — the copy is a private VERSION of the original
+// (parentId = the source) that lands in the copier's ЛИЧНАЯ библиотека and
+// opens in the editor. The version keeps the source's exact title, is never
+// public, and carries every attached file / qualification test over.
+export async function copyEvent(userId: string, id: string) {
+  const source = await db.smmEvent.findUnique({ where: { id } });
+  if (!source) throw ApiError.notFound("Event not found");
+  if (source.customerId === userId) {
+    // the owner edits their own event in place — no version is made
+    throw ApiError.badRequest("Own event is edited in place");
+  }
+  const copy = await db.smmEvent.create({
+    data: {
+      customerId: userId,
+      title: source.title,
+      summary: source.summary,
+      brief: source.brief,
+      deadline: source.deadline,
+      budget: source.budget,
+      restrictions: source.restrictions,
+      kind: source.kind,
+      format: source.format,
+      platform: source.platform,
+      location: source.location,
+      timeAt: source.timeAt,
+      testIds: [...source.testIds],
+      attachments: (source.attachments as any) ?? undefined,
+      coverColor: source.coverColor,
+      coverIcon: source.coverIcon,
+      isPublic: false, // a VERSION never appears in the community library
+      parentId: source.id,
+    },
+    include: eventInclude,
+  });
+  return { ...copy, tests: await eventTests(copy.testIds) };
 }
 
 // ── SPECIALISTS (the customer's публичная библиотека) ───────────────────────

@@ -244,6 +244,13 @@ export const api = {
   updateEvent: (id: string, data: Record<string, unknown>) =>
     apiFetch(`/smm/events/${id}`, { method: 'PUT', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmEventT>,
   deleteEvent: (id: string) => apiFetch(`/smm/events/${id}`, { method: 'DELETE' }),
+  // «Изменить» on somebody else's мероприятие/пост: the server makes a private
+  // VERSION of the original (parentId = the source) in MY library — the same
+  // startEditTest → copyTest rule the test cards keep.
+  copySmmEvent: (id: string) =>
+    apiFetch(`/smm/events/${id}/copy`, { method: 'POST' }) as Promise<import('@/lib/app-types').SmmEventT>,
+  copySmmPost: (id: string) =>
+    apiFetch(`/smm/posts/${id}/copy`, { method: 'POST' }) as Promise<import('@/lib/app-types').SmmPostT>,
 
   // Specialists (the customer's публичная библиотека): cards with rating,
   // orders count, roles + prices.

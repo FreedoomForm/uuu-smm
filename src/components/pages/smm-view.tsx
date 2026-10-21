@@ -26,8 +26,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { tUI } from '@/lib/i18n';
 import { CreatorStrip } from '@/components/shared-bits';
 import {
-  ArrowLeft, Compass, Edit, Film, Library, LayoutGrid, Loader2, MessageCircle,
-  Paperclip, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList,
+  ArrowLeft, Compass, Edit, Film, Library, LayoutGrid, Loader2, MessageCircle, MessageSquare,
+  Paperclip, Pencil, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList,
 } from 'lucide-react';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
@@ -45,6 +45,9 @@ const GroupChatPanel = dynamic(() => import('@/components/chat-panels').then(m =
 const AttachmentsList = dynamic(() => import('@/components/attachments').then(m => m.AttachmentsList), { ssr: false, loading: () => null });
 import { useExitMount } from '@/components/motion';
 import { ResizableSheetFrame } from '@/components/resize-sheet';
+import { SheetHeaderSwitcher } from '@/components/sheet-switcher';
+import type { SheetOption } from '@/components/pages/take-test/sheet-config';
+import { SmmEventForm, SmmPostForm, type SmmFormHandle } from './smm-editors';
 
 // One AI conversation about one SMM card (persisted in localStorage — the
 // same deal the test dashboard's threads keep, but scoped to the SMM page)
@@ -134,6 +137,21 @@ export default function SmmDashboard() {
   // The delete dialog («Удалить» on the card — the same confirm-first dialog
   // the test cards open before deleting)
   const [smmDelete, setSmmDelete] = useState<{ kind: 'event' | 'post' | 'specialist'; id: string; title: string } | null>(null);
+  // THE EDIT WINDOW («Изменить» on the card / in the window switcher — the
+  // SAME window the test cards open: a resizable sheet with the editor body
+  // inside + Save, NOT the full-page editor). Somebody else's card first
+  // becomes a private VERSION copy (the server-side copyEvent/copyPost).
+  const [editWin, setEditWin] = useState<{ kind: 'event' | 'post'; id: string; title: string } | null>(null);
+  const [editWinSaving, setEditWinSaving] = useState(false);
+  const editWinMounted = useExitMount(!!editWin, 200);
+  const editWinLast = useRef<{ kind: 'event' | 'post'; id: string; title: string } | null>(null);
+  useEffect(() => { if (editWin) editWinLast.current = editWin; }, [editWin]);
+  const editEventFormRef = useRef<SmmFormHandle>(null);
+  const editPostFormRef = useRef<SmmFormHandle>(null);
+  // The files target per card (the switcher's «Файлы» option reuses the
+  // target built at the card's «Файлы» click — the same cache the tests'
+  // dashFilesCountRef keeps)
+  const filesItemRef = useRef<Record<string, SmmFilesTarget>>({});
 
   // ── «Обсудить с ИИ» window state (per-card threads in localStorage) ──
   const [aiOpen, setAiOpen] = useState(false);
@@ -359,10 +377,13 @@ export default function SmmDashboard() {
   };
 
   // ── «Обсудить с ИИ» — the SAME window the test cards open, fed by the
-  // card's passport (/api/smm/ai-chat) ──
+  // card's passport (/api/smm/ai-chat). One window at a time: the files /
+  // chat / edit windows yield (the same rule the test cards keep).
   const openSmmAi = (kind: 'event' | 'post' | 'specialist', id: string, title: string) => {
     const tid = `${kind}:${id}`;
     const th = aiThreads[tid];
+    setEditWin(null);
+    useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
     setAiTarget({ kind, id, title });
     setAiMessages(th ? [...th.messages] : []);
     setAiOpen(true);
@@ -445,8 +466,13 @@ export default function SmmDashboard() {
     if (topWindow === 'files' || topWindow === 'card-chat') useSmmStore.setState({ topWindow: 'none', filesTarget: null, cardChat: null });
     else if (topWindow !== 'none') return;
     if (!activeItem) return;
-    if (activeItem.kind === 'post' && activeItem.specialistId === myId) { useSmmStore.setState({ editingId: activeItem.id }); setPage('smm-post-editor'); }
-    else if (activeItem.kind === 'event' && activeItem.customerId === myId) { useSmmStore.setState({ editingId: activeItem.id }); setPage('smm-event-editor'); }
+    // the SAME edit window the card's «Изменить» button opens (own → window;
+    // somebody else's → private version copy first)
+    void openEditWindow(
+      activeItem.kind,
+      activeItem.id,
+      activeItem.kind === 'event' ? activeItem.title : activeItem.kind === 'post' ? (activeItem.role?.name || t('smmPost')) : activeItem.name,
+    );
   };
 
   const submitChatCreate = async () => {
@@ -542,6 +568,107 @@ export default function SmmDashboard() {
     return (s || '?').toUpperCase();
   })();
 
+  // ── THE EDIT WINDOW TARGET («Изменить» from a card or the switcher) ─────
+  // Somebody else's мероприятие/пост is NEVER edited in place — the test-card
+  // rule (startEditTest → copyTest): the server makes a private VERSION of
+  // the original (parentId = the source) that lands in MY личная библиотека
+  // and opens in the edit window. Own cards open in the window directly.
+  const openEditWindow = async (kind: 'event' | 'post' | 'specialist', id: string, title: string) => {
+    // one window at a time: the AI panel / files / chat windows yield
+    setAiOpen(false);
+    useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
+    if (kind === 'specialist') {
+      // The specialist card is edited through YOUR profile (name/avatar);
+      // a stranger's card can never be changed.
+      if (id === myId) setPage('profile');
+      else toast(t('smmEditOwnOnly'));
+      return;
+    }
+    const own = kind === 'post'
+      ? (items.find(x => x.id === id) as any)?.specialistId === myId
+      : (items.find(x => x.id === id) as any)?.customerId === myId;
+    if (own) { setEditWin({ kind, id, title }); return; }
+    setBusy(true);
+    toast(t('copyCreating'));
+    try {
+      const copy: any = kind === 'post' ? await api.copySmmPost(id) : await api.copySmmEvent(id);
+      toast(t('copyCreated'));
+      bumpAndReload();
+      setEditWin({ kind, id: copy.id, title });
+    } catch (e: any) {
+      toast(e?.message || 'Error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ── THE WINDOW SWITCHER — the SAME header dropdown every dashboard window
+  // of the tests site wears (dashSwitcher): files / AI / chat / edit, ALL
+  // windows of ONE card share it, so switching from the chat window that
+  // slid up from the bottom lands you in the «Прикреплённые файлы» or
+  // «Изменить» window of the SAME card without closing anything.
+  const smmWindowCard: { kind: 'event' | 'post' | 'specialist'; id: string; title: string } | null = (() => {
+    if (filesTarget) return { kind: filesTarget.kind, id: filesTarget.id, title: filesTarget.title };
+    if (cardChat) return cardChat;
+    if (aiOpen && aiTarget) return aiTarget;
+    if (editWin) return editWin;
+    return null;
+  })();
+  const smmFilesCount = (() => {
+    if (!smmWindowCard) return 0;
+    if (filesTarget && filesTarget.id === smmWindowCard.id) {
+      return (filesTarget.files?.length || 0)
+        + (filesTarget.kind === 'event' ? (filesTarget.tests?.length || 0) : (filesTarget.media?.length || 0));
+    }
+    const cached = filesItemRef.current[smmWindowCard.id];
+    if (!cached) return 0;
+    return (cached.files?.length || 0)
+      + (cached.kind === 'event' ? (cached.tests?.length || 0) : (cached.media?.length || 0));
+  })();
+  const smmSheetOptions: SheetOption[] = [
+    ...((smmFilesCount > 0) ? [{
+      key: 'files' as const,
+      label: t('files', { n: smmFilesCount }),
+      icon: <Paperclip className="w-3.5 h-3.5" />,
+      active: !!filesTarget,
+    }] : []),
+    { key: 'ai', label: t('aiTutor'), icon: <MessageSquare className="w-3.5 h-3.5" />, active: aiOpen },
+    { key: 'group', label: t('chat'), icon: <MessageCircle className="w-3.5 h-3.5" />, active: !!cardChat },
+    ...((smmWindowCard && smmWindowCard.kind !== 'specialist') ? [{
+      key: 'edit' as const,
+      label: smmWindowCard.kind === 'event' ? t('smmEventEdit') : t('smmPostEdit'),
+      icon: <Pencil className="w-3.5 h-3.5" />,
+      active: !!editWin,
+    }] : []),
+  ];
+  const smmSwitcher = { options: smmSheetOptions, onSelect: (key: string) => {
+    if (!smmWindowCard) return;
+    const w = smmWindowCard;
+    if (key === 'edit') {
+      // the edit window for the SAME card the switcher lives on
+      if (w.kind === 'specialist') return;
+      setEditWin(null);
+      void openEditWindow(w.kind, w.id, w.title);
+      return;
+    }
+    if (key === 'files') {
+      setEditWin(null); setAiOpen(false);
+      const cached = filesItemRef.current[w.id];
+      if (cached) useSmmStore.setState({ filesTarget: cached, topWindow: 'files', openChatId: null });
+      return;
+    }
+    if (key === 'ai') {
+      setEditWin(null);
+      useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
+      openSmmAi(w.kind, w.id, w.title);
+      return;
+    }
+    if (key === 'group') {
+      setEditWin(null); setAiOpen(false);
+      useSmmStore.setState({ cardChat: { kind: w.kind, id: w.id, title: w.title }, topWindow: 'card-chat', openChatId: null });
+    }
+  } };
+
   const makeCtx = (it: AnyItem, selected: boolean): CardCtx => ({
     t,
     myId,
@@ -569,23 +696,21 @@ export default function SmmDashboard() {
     aiActive: aiOpen && aiTarget?.id === it.id,
     onFiles: () => {
       if (it.kind === 'event') {
-        useSmmStore.setState({
-          filesTarget: {
-            kind: 'event', id: it.id, title: it.title,
-            tests: (it.tests || []).map(tt => ({ id: tt.id, title: tt.title, questions: tt._count?.questions ?? 0 })),
-            files: ((it as SmmEventT).attachments || []) as SmmFilesTarget['files'],
-          },
-          topWindow: 'files', openChatId: null,
-        });
+        const target: SmmFilesTarget = {
+          kind: 'event', id: it.id, title: it.title,
+          tests: (it.tests || []).map(tt => ({ id: tt.id, title: tt.title, questions: tt._count?.questions ?? 0 })),
+          files: ((it as SmmEventT).attachments || []) as SmmFilesTarget['files'],
+        };
+        filesItemRef.current[it.id] = target;
+        useSmmStore.setState({ filesTarget: target, topWindow: 'files', openChatId: null });
       } else if (it.kind === 'post') {
-        useSmmStore.setState({
-          filesTarget: {
-            kind: 'post', id: it.id, title: it.role?.name || t('smmPost'),
-            media: ((it.media || []) as { url: string; type: string }[]).slice(0, 30),
-            files: ((it as SmmPostT).attachments || []) as SmmFilesTarget['files'],
-          },
-          topWindow: 'files', openChatId: null,
-        });
+        const target: SmmFilesTarget = {
+          kind: 'post', id: it.id, title: it.role?.name || t('smmPost'),
+          media: ((it.media || []) as { url: string; type: string }[]).slice(0, 30),
+          files: ((it as SmmPostT).attachments || []) as SmmFilesTarget['files'],
+        };
+        filesItemRef.current[it.id] = target;
+        useSmmStore.setState({ filesTarget: target, topWindow: 'files', openChatId: null });
       } else {
         // the specialist card: the files window carries the media + files of
         // THEIR posts (the profile API returns the posts with both)
@@ -594,10 +719,9 @@ export default function SmmDashboard() {
           .then((p: any) => {
             const media = (p.posts || []).flatMap((pp: any) => ((pp.media || []) as { url: string; type: string }[]));
             const files = (p.posts || []).flatMap((pp: any) => ((pp.attachments || []) as SmmFilesTarget['files']));
-            useSmmStore.setState({
-              filesTarget: { kind: 'post', id: it.id, title: it.name, media: media.slice(0, 60), files: files.slice(0, 30) },
-              topWindow: 'files', openChatId: null,
-            });
+            const target: SmmFilesTarget = { kind: 'post', id: it.id, title: it.name, media: media.slice(0, 60), files: files.slice(0, 30) };
+            filesItemRef.current[it.id] = target;
+            useSmmStore.setState({ filesTarget: target, topWindow: 'files', openChatId: null });
           })
           .catch((e: any) => toast(e?.message || 'Error'))
           .finally(() => setBusy(false));
@@ -613,49 +737,15 @@ export default function SmmDashboard() {
     onChat: () => {
       // «Чат» on the card = the per-card GROUP CHAT WINDOW — everyone's chat
       // about THIS card, the exact mechanic the test cards keep. One window
-      // at a time: the AI panel closes (the same rule the test card keeps).
+      // at a time: the AI panel and the edit window close (the same rule the
+      // test card keeps).
       setAiOpen(false);
+      setEditWin(null);
       const title = it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name;
       useSmmStore.setState({ cardChat: { kind: it.kind, id: it.id, title }, topWindow: 'card-chat', openChatId: null });
     },
     onShare: () => { if (it.kind !== 'specialist') void doShare(it.kind, it.id); },
-    onEdit: () => {
-      if (it.kind === 'post') {
-        if (it.specialistId === myId) { useSmmStore.setState({ editingId: it.id }); setPage('smm-post-editor'); }
-        else {
-          // Somebody else's post is NEVER edited in place — the test-card
-          // rule: «Изменить» makes a private copy and opens THAT copy.
-          setBusy(true);
-          toast(t('copyCreating'));
-          api.createPost({
-            role: { name: it.role?.name || t('smmPost'), pricePerK: it.role?.pricePerK ?? undefined, pricePerDay: it.role?.pricePerDay ?? undefined },
-            description: it.description, media: it.media || [], coverColor: it.coverColor || null, coverIcon: it.coverIcon || null,
-          })
-            .then((p: any) => { toast(t('copyCreated')); useSmmStore.setState({ editingId: p.id }); setPage('smm-post-editor'); bumpAndReload(); })
-            .catch((e: any) => toast(e?.message || 'Error'))
-            .finally(() => setBusy(false));
-        }
-      } else if (it.kind === 'event') {
-        if (it.customerId === myId) { useSmmStore.setState({ editingId: it.id }); setPage('smm-event-editor'); }
-        else {
-          setBusy(true);
-          toast(t('copyCreating'));
-          api.createEvent({
-            title: it.title, summary: it.summary, brief: it.brief || '', format: it.format, platform: it.platform,
-            location: it.location, timeAt: it.timeAt, testIds: it.testIds || [],
-            coverColor: it.coverColor || null, coverIcon: it.coverIcon || null, isPublic: false,
-          })
-            .then((ev: any) => { toast(t('copyCreated')); useSmmStore.setState({ editingId: ev.id }); setPage('smm-event-editor'); bumpAndReload(); })
-            .catch((e: any) => toast(e?.message || 'Error'))
-            .finally(() => setBusy(false));
-        }
-      } else {
-        // The specialist card is edited through YOUR profile (name/avatar);
-        // a stranger's card can never be changed.
-        if (it.id === myId) setPage('profile');
-        else toast(t('smmEditOwnOnly'));
-      }
-    },
+    onEdit: () => { openEditWindow(it.kind, it.id, it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name); },
     onDelete: () => {
       // «Удалить» opens the same confirm-first dialog the test cards open —
       // the delete itself happens only after the confirmation.
@@ -1184,6 +1274,7 @@ export default function SmmDashboard() {
             noChatsLabel={t('noChatsYet')}
             onNewChat={newSmmAiThread}
             newChatLabel={t('newChat')}
+            switcher={smmSwitcher}
           />
         </div>
       </div>
@@ -1208,6 +1299,7 @@ export default function SmmDashboard() {
               inputPlaceholder={t('smmChatMessage')}
               onOpenProfile={(u) => useSmmStore.setState({ cardChat: null, filesTarget: null, topWindow: 'profile', profileUserId: u.id })}
               openProfileLabel={t('smmViewProfile')}
+              switcher={smmSwitcher}
             />
           </div>
         </div>
@@ -1222,8 +1314,74 @@ export default function SmmDashboard() {
           onClose={() => useSmmStore.setState({ filesTarget: null, topWindow: 'none' })}
           t={t}
           onOpenImage={(u) => setImgPreview(u)}
+          switcher={smmSwitcher}
         />
       )}
+      {/* THE EDIT WINDOW — «Изменить» from a card or the window switcher: the
+      SAME resizable sheet the test cards open (the editor body inside + Save
+      in the footer; the header wears the window switcher). Somebody else's
+      card first became a private VERSION copy — the rule startEditTest keeps. */}
+      {editWinMounted && editWinLast.current && (() => {
+        const w = editWinLast.current;
+        const title = w.kind === 'event' ? t('smmEventEdit') : t('smmPostEdit');
+        return (
+          <ResizableSheetFrame
+            open={!!editWin}
+            onClose={() => setEditWin(null)}
+            initialVh={0.85}
+            minVh={0.4}
+            maxW="max-w-3xl"
+            header={
+              <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
+                <SheetHeaderSwitcher
+                  icon={<Pencil className="w-4 h-4 text-white" />}
+                  title={title}
+                  subtitle={w.title}
+                  options={smmSheetOptions}
+                  onSelect={smmSwitcher.onSelect}
+                />
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => setEditWin(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            }
+            body={
+              <div className="px-4 py-4">
+                <div className="max-w-3xl mx-auto space-y-4">
+                  {w.kind === 'event' ? (
+                    <SmmEventForm
+                      ref={editEventFormRef}
+                      editingId={w.id}
+                      onSaving={setEditWinSaving}
+                      onSaved={() => { setEditWin(null); bumpAndReload(); }}
+                      onFail={() => setEditWin(null)}
+                    />
+                  ) : (
+                    <SmmPostForm
+                      ref={editPostFormRef}
+                      editingId={w.id}
+                      onSaving={setEditWinSaving}
+                      onSaved={() => { setEditWin(null); bumpAndReload(); }}
+                      onFail={() => setEditWin(null)}
+                    />
+                  )}
+                </div>
+              </div>
+            }
+            footer={
+              <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-4 pt-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+                <Button
+                  onClick={() => (w.kind === 'event' ? editEventFormRef.current?.save() : editPostFormRef.current?.save())}
+                  disabled={editWinSaving}
+                  className="w-full rounded-full bg-primary hover:bg-primary/90"
+                >
+                  {editWinSaving ? t('saving') : t('save')}
+                </Button>
+              </div>
+            }
+          />
+        );
+      })()}
       <SmmToast />
     </div>
   );
@@ -1250,12 +1408,13 @@ function useIsDesktopLg() {
 // sheet on mobile): the card's «Прикреплённые файлы» rows first (inline
 // players for audio/video, PDF.js for pdf, previews for images), then the
 // event's qualification tests OR the post's media collection.
-function SmmFilesWindow({ target, open, onClose, t, onOpenImage }: {
+function SmmFilesWindow({ target, open, onClose, t, onOpenImage, switcher }: {
   target: SmmFilesTarget;
   open: boolean;
   onClose: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
   onOpenImage: (url: string) => void;
+  switcher?: { options: SheetOption[]; onSelect: (key: string) => void };
 }) {
   const isDesktop = useIsDesktopLg();
   const files = (target.files || []) as import('@/components/attachment-utils').AttachmentItem[];
@@ -1265,12 +1424,22 @@ function SmmFilesWindow({ target, open, onClose, t, onOpenImage }: {
 
   const header = (
     <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-      <span className="min-w-0">
-        <span className="font-semibold text-sm flex items-center gap-1.5">
-          <Paperclip className="w-4 h-4" /> {t('attachedFiles', { n: total })}
+      {switcher ? (
+        <SheetHeaderSwitcher
+          icon={<Paperclip className="w-4 h-4 text-white" />}
+          title={t('attachedFiles', { n: total })}
+          subtitle={target.title}
+          options={switcher.options}
+          onSelect={switcher.onSelect}
+        />
+      ) : (
+        <span className="min-w-0">
+          <span className="font-semibold text-sm flex items-center gap-1.5">
+            <Paperclip className="w-4 h-4" /> {t('attachedFiles', { n: total })}
+          </span>
+          <span className="block text-xs text-muted-foreground truncate">{target.title}</span>
         </span>
-        <span className="block text-xs text-muted-foreground truncate">{target.title}</span>
-      </span>
+      )}
       <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
         <X className="w-4 h-4" />
       </Button>
