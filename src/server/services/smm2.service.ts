@@ -10,6 +10,32 @@ import { ApiError } from "../http/errors";
 
 type PostMedia = { url: string; type: "video" | "image"; title?: string };
 
+// The «Прикреплённые файлы» row — the SAME shape the test attachments keep
+// (title/type/url/size/tgMessageId): audio, video, pdf, image, embed, link.
+type SmmAttachment = {
+  title: string;
+  type: "audio" | "video" | "pdf" | "image" | "embed" | "link";
+  url: string;
+  size?: number | null;
+  tgMessageId?: number | null;
+};
+
+const ATTACHMENT_TYPES = ["audio", "video", "pdf", "image", "embed", "link"];
+
+function asAttachments(v: unknown): SmmAttachment[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((a: any) => a && typeof a.url === "string" && a.url.length < 4000000)
+    .slice(0, 30)
+    .map((a: any) => ({
+      title: String(typeof a.title === "string" && a.title.trim() ? a.title : "Attachment").slice(0, 200),
+      type: (ATTACHMENT_TYPES.includes(a.type) ? a.type : "link") as SmmAttachment["type"],
+      url: String(a.url),
+      ...(typeof a.size === "number" && isFinite(a.size) && a.size >= 0 ? { size: Math.round(a.size) } : {}),
+      ...(typeof a.tgMessageId === "number" ? { tgMessageId: a.tgMessageId } : {}),
+    }));
+}
+
 const publicUser = {
   select: { id: true, name: true, image: true },
 };
@@ -103,6 +129,7 @@ export async function createPost(
     role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown };
     description?: string;
     media?: unknown;
+    attachments?: unknown;
     coverColor?: unknown;
     coverIcon?: unknown;
   }
@@ -116,6 +143,7 @@ export async function createPost(
       roleId: role.id,
       description: String(body.description || "").slice(0, 8000),
       media: asMedia(body.media),
+      attachments: asAttachments(body.attachments),
       coverColor: typeof body.coverColor === "string" ? body.coverColor.slice(0, 32) : null,
       coverIcon: typeof body.coverIcon === "string" ? body.coverIcon.slice(0, 16) : null,
     },
@@ -142,6 +170,7 @@ export async function updatePost(
     role?: { name?: string; pricePerK?: unknown; pricePerDay?: unknown };
     description?: string;
     media?: unknown;
+    attachments?: unknown;
     coverColor?: unknown;
     coverIcon?: unknown;
   }
@@ -170,6 +199,7 @@ export async function updatePost(
   }
   if (typeof body.description === "string") data.description = body.description.slice(0, 8000);
   if (body.media !== undefined) data.media = asMedia(body.media);
+  if (body.attachments !== undefined) data.attachments = asAttachments(body.attachments);
   if (body.coverColor !== undefined) data.coverColor = typeof body.coverColor === "string" ? body.coverColor.slice(0, 32) : null;
   if (body.coverIcon !== undefined) data.coverIcon = typeof body.coverIcon === "string" ? body.coverIcon.slice(0, 16) : null;
   return db.smmPost.update({
@@ -243,6 +273,8 @@ function eventPayload(userId: string, body: Record<string, unknown>, forCreate: 
   if (Array.isArray(body.testIds)) {
     data.testIds = (body.testIds as unknown[]).filter((x) => typeof x === "string").slice(0, 20);
   }
+  // the editor's «Прикреплённые файлы» section (the test editor's shape)
+  if (body.attachments !== undefined) data.attachments = asAttachments(body.attachments);
   if (body.coverColor !== undefined) data.coverColor = typeof body.coverColor === "string" ? body.coverColor.slice(0, 32) : null;
   if (body.coverIcon !== undefined) data.coverIcon = typeof body.coverIcon === "string" ? body.coverIcon.slice(0, 16) : null;
   if (typeof body.isPublic === "boolean") data.isPublic = body.isPublic;

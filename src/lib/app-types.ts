@@ -152,6 +152,16 @@ export interface SmmPostMedia {
   title?: string;
 }
 
+// The «Прикреплённые файлы» row of the SMM editors — the SAME shape the
+// test attachments keep (title/type/url/size + the Telegram storage ref)
+export interface SmmAttachmentT {
+  title: string;
+  type: 'audio' | 'video' | 'pdf' | 'image' | 'embed' | 'link';
+  url: string;
+  size?: number | null;
+  tgMessageId?: number | null;
+}
+
 // ПОСТ — the specialist's card about their work for ONE role
 export interface SmmPostT {
   id: string;
@@ -159,6 +169,7 @@ export interface SmmPostT {
   roleId: string;
   description: string;
   media?: SmmPostMedia[] | null;
+  attachments?: SmmAttachmentT[] | null;
   coverColor?: string | null;
   coverIcon?: string | null;
   createdAt: string;
@@ -178,6 +189,7 @@ export interface SmmEventT {
   location: string;
   timeAt: string;
   testIds: string[];
+  attachments?: SmmAttachmentT[] | null;
   coverColor?: string | null;
   coverIcon?: string | null;
   isPublic: boolean;

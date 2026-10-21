@@ -27,18 +27,24 @@ import { tUI } from '@/lib/i18n';
 import { CreatorStrip } from '@/components/shared-bits';
 import {
   ArrowLeft, Compass, Edit, Film, Library, LayoutGrid, Loader2, MessageCircle,
-  Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList,
+  Paperclip, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList,
 } from 'lucide-react';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
 import { useDashboardStore } from '@/stores/dashboard-store';
 import { useProfileStore } from '@/stores/profile-store';
-import { useSmmStore, smmNow, type SmmMode } from '@/stores/smm-store';
+import { useSmmStore, smmNow, type SmmMode, type SmmFilesTarget, type SmmCardChatTarget } from '@/stores/smm-store';
 import type { SmmChatT, SmmEventT, SmmPostT, SmmRequestRowT, SmmRoleT, SmmSpecialistT, SmmProfileT } from '@/lib/app-types';
 
-// The «Обсудить с ИИ» window — the SAME panel the test cards open (the
-// dynamic import keeps it out of the first paint, like app-root does)
+// The card windows — the SAME panels the test cards open (the dynamic
+// imports keep them out of the first paint, like app-root does):
+//   AiChatPanel    — «Обсудить с ИИ» (side panel on desktop / sheet on mobile)
+//   GroupChatPanel — «Чат», everyone's group chat about THIS card
 const AiChatPanel = dynamic(() => import('@/components/chat-panels').then(m => m.AiChatPanel), { ssr: false, loading: () => null });
+const GroupChatPanel = dynamic(() => import('@/components/chat-panels').then(m => m.GroupChatPanel), { ssr: false, loading: () => null });
+const AttachmentsList = dynamic(() => import('@/components/attachments').then(m => m.AttachmentsList), { ssr: false, loading: () => null });
+import { useExitMount } from '@/components/motion';
+import { ResizableSheetFrame } from '@/components/resize-sheet';
 
 // One AI conversation about one SMM card (persisted in localStorage — the
 // same deal the test dashboard's threads keep, but scoped to the SMM page)
@@ -116,6 +122,15 @@ export default function SmmDashboard() {
   const [cardMessages, setCardMessages] = useState<import('@/lib/app-types').SmmChatMessageT[]>([]);
   const [cardInput, setCardInput] = useState('');
   const cardEndRef = useRef<HTMLDivElement | null>(null);
+  // The card windows stay mounted while their slide-down/fade exit animation
+  // plays (the same deal the test windows keep) — the last target lives in a
+  // ref so the panel doesn't blank out mid-exit.
+  const cardChatMounted = useExitMount(!!cardChat, 220);
+  const cardChatLast = useRef<SmmCardChatTarget | null>(null);
+  useEffect(() => { if (cardChat) cardChatLast.current = cardChat; }, [cardChat]);
+  const filesMounted = useExitMount(!!filesTarget, 220);
+  const filesLast = useRef<SmmFilesTarget | null>(null);
+  useEffect(() => { if (filesTarget) filesLast.current = filesTarget; }, [filesTarget]);
   // The delete dialog («Удалить» on the card — the same confirm-first dialog
   // the test cards open before deleting)
   const [smmDelete, setSmmDelete] = useState<{ kind: 'event' | 'post' | 'specialist'; id: string; title: string } | null>(null);
@@ -412,6 +427,9 @@ export default function SmmDashboard() {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
   const startCreate = () => {
+    // the files / card-chat windows are floating panels — «+» closes them and
+    // creates a card of the current mode (the same routing the tests keep)
+    if (topWindow === 'files' || topWindow === 'card-chat') useSmmStore.setState({ topWindow: 'none', filesTarget: null, cardChat: null });
     if (topWindow === 'chats') { setChatCreateOpen(true); setRenamingChatId(null); setChatTitle(''); return; }
     if (topWindow === 'requests' || topWindow === 'bookmarks') { toast(t('smmRequestsEmpty')); return; }
     if (isSpecialist) {
@@ -424,7 +442,8 @@ export default function SmmDashboard() {
   };
 
   const startEditActive = () => {
-    if (topWindow !== 'none') return;
+    if (topWindow === 'files' || topWindow === 'card-chat') useSmmStore.setState({ topWindow: 'none', filesTarget: null, cardChat: null });
+    else if (topWindow !== 'none') return;
     if (!activeItem) return;
     if (activeItem.kind === 'post' && activeItem.specialistId === myId) { useSmmStore.setState({ editingId: activeItem.id }); setPage('smm-post-editor'); }
     else if (activeItem.kind === 'event' && activeItem.customerId === myId) { useSmmStore.setState({ editingId: activeItem.id }); setPage('smm-event-editor'); }
@@ -554,6 +573,7 @@ export default function SmmDashboard() {
           filesTarget: {
             kind: 'event', id: it.id, title: it.title,
             tests: (it.tests || []).map(tt => ({ id: tt.id, title: tt.title, questions: tt._count?.questions ?? 0 })),
+            files: ((it as SmmEventT).attachments || []) as SmmFilesTarget['files'],
           },
           topWindow: 'files', openChatId: null,
         });
@@ -562,18 +582,20 @@ export default function SmmDashboard() {
           filesTarget: {
             kind: 'post', id: it.id, title: it.role?.name || t('smmPost'),
             media: ((it.media || []) as { url: string; type: string }[]).slice(0, 30),
+            files: ((it as SmmPostT).attachments || []) as SmmFilesTarget['files'],
           },
           topWindow: 'files', openChatId: null,
         });
       } else {
-        // the specialist card: the files window carries the media of THEIR
-        // posts (the profile API returns the posts with the media)
+        // the specialist card: the files window carries the media + files of
+        // THEIR posts (the profile API returns the posts with both)
         setBusy(true);
         api.getSmmProfile(it.id)
           .then((p: any) => {
             const media = (p.posts || []).flatMap((pp: any) => ((pp.media || []) as { url: string; type: string }[]));
+            const files = (p.posts || []).flatMap((pp: any) => ((pp.attachments || []) as SmmFilesTarget['files']));
             useSmmStore.setState({
-              filesTarget: { kind: 'post', id: it.id, title: it.name, media: media.slice(0, 60) },
+              filesTarget: { kind: 'post', id: it.id, title: it.name, media: media.slice(0, 60), files: files.slice(0, 30) },
               topWindow: 'files', openChatId: null,
             });
           })
@@ -702,7 +724,9 @@ export default function SmmDashboard() {
       }
       return null;
     }
-    if (topWindow !== 'none' || !activeItem) return null;
+    // the files / card-chat windows are floating PANELS now — the main area
+    // (and the first bar with it) stays visible while they are open
+    if (!(topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat') || !activeItem) return null;
     if (editMode) {
       const canEdit = (activeItem.kind === 'post' && activeItem.specialistId === myId)
         || (activeItem.kind === 'event' && activeItem.customerId === myId);
@@ -719,12 +743,13 @@ export default function SmmDashboard() {
   })();
 
   // ── window contents ─────────────────────────────────────────────────────
+  // The card-chat / files windows are FLOATING PANELS now (the same docked-
+  // panel format the «Обсудить с ИИ» window keeps) — they no longer replace
+  // the main window, so they carry no windowTitle.
   const windowTitle = topWindow === 'bookmarks' ? t('smmTopBookmarks')
     : topWindow === 'chats' ? t('smmTopChats')
     : topWindow === 'requests' ? t('smmRequestsMine')
-    : topWindow === 'profile' ? t('smmViewProfile')
-    : topWindow === 'card-chat' ? t('gChat')
-    : topWindow === 'files' ? (filesTarget?.kind === 'event' ? t('smmEventTests') : t('gFiles')) : null;
+    : topWindow === 'profile' ? t('smmViewProfile') : null;
 
   const renderCard = (it: AnyItem, selected: boolean, variant: 'grid' | 'feed') => {
     const ctx = makeCtx(it, selected);
@@ -735,81 +760,6 @@ export default function SmmDashboard() {
 
   const renderMainWindow = () => {
     if (windowTitle) {
-      // ── the ОКНО ФАЙЛОВ (the event's qualification tests / the post's
-      // media collection — the same window the test files button opens) ──
-      if (topWindow === 'files' && filesTarget) {
-        return (
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
-            <div className="max-w-2xl mx-auto flex flex-col gap-2">
-              <p className="text-sm font-bold text-muted-foreground px-1 truncate">{filesTarget.title}</p>
-              {filesTarget.kind === 'event' && (
-                (filesTarget.tests || []).length === 0
-                  ? <p className="text-sm text-muted-foreground text-center py-10">{t('smmEventTestsNone')}</p>
-                  : (filesTarget.tests || []).map(tt => (
-                    <div key={tt.id} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
-                      <span className="w-10 h-10 rounded-xl bg-[#DFF3E8] flex items-center justify-center shrink-0"><ClipboardList className="w-5 h-5 text-cta" /></span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold truncate">{tt.title}</p>
-                        <p className="text-xs text-muted-foreground">{t('smmTestQuestions', { n: tt.questions ?? 0 })}</p>
-                      </div>
-                    </div>
-                  ))
-              )}
-              {filesTarget.kind === 'post' && (
-                (filesTarget.media || []).length === 0
-                  ? <p className="text-sm text-muted-foreground text-center py-10">{t('smmProfileNothing')}</p>
-                  : (filesTarget.media || []).map((m, i) => (
-                    m.type === 'image' ? (
-                      <button key={i} type="button" onClick={() => setImgPreview(mediaSrc(m.url))} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3 text-left hover:border-black/30 transition-colors">
-                        <span className="w-10 h-10 rounded-xl overflow-hidden shrink-0"><img src={mediaSrc(m.url)} alt="" className="w-full h-full object-cover" /></span>
-                        <span className="min-w-0 flex-1 text-sm font-bold truncate">{t('smmPhoto')}</span>
-                      </button>
-                    ) : (
-                      <div key={i} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
-                        <span className="w-10 h-10 rounded-xl bg-[#FFF0D9] flex items-center justify-center shrink-0"><Film className="w-5 h-5 text-cta" /></span>
-                        <span className="min-w-0 flex-1 text-sm font-bold truncate">{t('smmVideo')}</span>
-                      </div>
-                    )
-                  ))
-              )}
-            </div>
-          </div>
-        );
-      }
-      // ── the ОКНО ГРУППОВОГО ЧАТА КАРТОЧКИ («Чат» on the card — everyone's
-      // chat about THIS card, the same per-card window the test cards open) ──
-      if (topWindow === 'card-chat' && cardChat) {
-        return (
-          <div className="flex-1 min-h-0 flex flex-col">
-            <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
-              <div className="max-w-2xl mx-auto flex flex-col gap-2">
-                <p className="text-sm font-bold text-muted-foreground px-1 truncate">{cardChat.title}</p>
-                {cardMessages.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">—</p>}
-                {cardMessages.map(m => {
-                  const mine = m.userId === myId;
-                  return (
-                    <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.kind === 'system' ? 'bg-[#FFF0D9] border border-black/10 text-black/80' : mine ? 'bg-cta text-white' : 'bg-muted'}`}>
-                        {!mine && m.kind !== 'system' && <p className="text-[10px] font-bold opacity-70 mb-0.5">{m.userName}</p>}
-                        <p className="whitespace-pre-wrap break-words">{m.text}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div ref={cardEndRef} />
-              </div>
-            </div>
-            <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-3 py-2" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-              <div className="max-w-2xl mx-auto flex gap-2">
-                <Input value={cardInput} onChange={e => setCardInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendCardChatMsg(); } }}
-                  placeholder={t('smmChatMessage')} className="h-9 rounded-full bg-white border-black/15" />
-                <Button size="sm" onClick={sendCardChatMsg} className="h-9 rounded-full shrink-0"><Send className="w-4 h-4" /></Button>
-              </div>
-            </div>
-          </div>
-        );
-      }
       // ── the ОКНО ПРОФИЛЯ (opened by tapping an author on any card) ──
       if (topWindow === 'profile') {
         const spProfile: SmmSpecialistT | null = profileData && profileData.user.roles.length > 0
@@ -1052,7 +1002,7 @@ export default function SmmDashboard() {
     );
   };
 
-  const plusHidden = topWindow === 'bookmarks' || topWindow === 'profile' || topWindow === 'files';
+  const plusHidden = topWindow === 'bookmarks' || topWindow === 'profile';
   const tw = topWindow as string; // widened read for the JSX comparisons
 
   return (
@@ -1076,7 +1026,7 @@ export default function SmmDashboard() {
           <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
             {(topWindow !== 'none' || openChatId) && (
               <Button variant="outline" size="icon"
-                onClick={() => { if (openChatId) useSmmStore.setState({ openChatId: null }); else if (cardChat) useSmmStore.setState({ cardChat: null, topWindow: 'none' }); else useSmmStore.setState({ topWindow: 'none' }); }}
+                onClick={() => { if (openChatId) useSmmStore.setState({ openChatId: null }); else useSmmStore.setState({ topWindow: 'none', filesTarget: null, cardChat: null }); }}
                 className="rounded-full shrink-0 border-black lg:h-10 lg:w-10" title={t('back')} aria-label={t('back')}>
                 <ArrowLeft className="w-4 h-4" />
               </Button>
@@ -1210,30 +1160,185 @@ export default function SmmDashboard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {/* «Обсудить с ИИ» — the SAME panel the test cards open */}
-      <AiChatPanel
-        open={aiOpen}
-        onClose={() => setAiOpen(false)}
-        subtitle={aiTarget?.title}
-        messages={aiMessages}
-        loading={aiLoading}
-        input={aiInput}
-        onInputChange={setAiInput}
-        onSend={() => sendSmmAi()}
-        endRef={aiEndRef}
-        inputPlaceholder={t('aiTestChatPlaceholder')}
-        historyOpen={aiHistoryOpen}
-        onToggleHistory={() => setAiHistoryOpen(v => !v)}
-        threads={aiThreadMetas}
-        activeThreadId={aiTarget ? `${aiTarget.kind}:${aiTarget.id}` : undefined}
-        onSelectThread={selectSmmAiThread}
-        historyLabel={t('chatHistory')}
-        noChatsLabel={t('noChatsYet')}
-        onNewChat={newSmmAiThread}
-        newChatLabel={t('newChat')}
-      />
+      {/* «Обсудить с ИИ» — the SAME panel the test cards open, docked to the
+      right edge on desktop exactly like the dashboard's AI window in app-root */}
+      <div className={aiOpen ? 'fixed inset-0 z-50 flex items-center justify-end lg:p-5 pointer-events-none' : 'contents'}>
+        <div className="pointer-events-auto max-h-full">
+          <AiChatPanel
+            open={aiOpen}
+            onClose={() => setAiOpen(false)}
+            subtitle={aiTarget?.title}
+            messages={aiMessages}
+            loading={aiLoading}
+            input={aiInput}
+            onInputChange={setAiInput}
+            onSend={() => sendSmmAi()}
+            endRef={aiEndRef}
+            inputPlaceholder={t('aiTestChatPlaceholder')}
+            historyOpen={aiHistoryOpen}
+            onToggleHistory={() => setAiHistoryOpen(v => !v)}
+            threads={aiThreadMetas}
+            activeThreadId={aiTarget ? `${aiTarget.kind}:${aiTarget.id}` : undefined}
+            onSelectThread={selectSmmAiThread}
+            historyLabel={t('chatHistory')}
+            noChatsLabel={t('noChatsYet')}
+            onNewChat={newSmmAiThread}
+            newChatLabel={t('newChat')}
+          />
+        </div>
+      </div>
+      {/* «Чат» on the card — everyone's group chat about THIS card, the SAME
+      GroupChatPanel the test cards open (side panel on desktop / the
+      resizable bottom sheet on mobile) */}
+      {cardChatMounted && cardChatLast.current && (
+        <div className="fixed inset-0 z-50 flex items-center justify-end lg:p-5 pointer-events-none">
+          <div className="pointer-events-auto max-h-full">
+            <GroupChatPanel
+              open={!!cardChat}
+              onClose={() => useSmmStore.setState({ cardChat: null, topWindow: 'none' })}
+              title={t('gChat')}
+              subtitle={cardChatLast.current.title}
+              messages={cardMessages.map(m => ({ id: m.id, userId: m.userId, userName: m.userName, text: m.text, createdAt: m.createdAt }))}
+              currentUserId={myId}
+              input={cardInput}
+              onInputChange={setCardInput}
+              onSend={() => { void sendCardChatMsg(); }}
+              sending={false}
+              endRef={cardEndRef}
+              inputPlaceholder={t('smmChatMessage')}
+              onOpenProfile={(u) => useSmmStore.setState({ cardChat: null, filesTarget: null, topWindow: 'profile', profileUserId: u.id })}
+              openProfileLabel={t('smmViewProfile')}
+            />
+          </div>
+        </div>
+      )}
+      {/* «Файлы» on the card — the SAME docked-panel window the test files
+      button opens: the card's «Прикреплённые файлы» + the event's
+      qualification tests OR the post's media collection */}
+      {filesMounted && filesLast.current && (
+        <SmmFilesWindow
+          target={filesLast.current}
+          open={!!filesTarget}
+          onClose={() => useSmmStore.setState({ filesTarget: null, topWindow: 'none' })}
+          t={t}
+          onOpenImage={(u) => setImgPreview(u)}
+        />
+      )}
       <SmmToast />
     </div>
+  );
+}
+
+// true when viewport >= lg (1024px) — the files window is a right-docked
+// panel on desktop and a resizable bottom sheet on mobile (the same split
+// the test files window keeps)
+function useIsDesktopLg() {
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const update = () => setIsDesktop(mq.matches);
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+  return isDesktop;
+}
+
+// THE FILES WINDOW («Файлы» on any card) — the same chrome the test files
+// window keeps (right-docked 400px panel on desktop / the resizable bottom
+// sheet on mobile): the card's «Прикреплённые файлы» rows first (inline
+// players for audio/video, PDF.js for pdf, previews for images), then the
+// event's qualification tests OR the post's media collection.
+function SmmFilesWindow({ target, open, onClose, t, onOpenImage }: {
+  target: SmmFilesTarget;
+  open: boolean;
+  onClose: () => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  onOpenImage: (url: string) => void;
+}) {
+  const isDesktop = useIsDesktopLg();
+  const files = (target.files || []) as import('@/components/attachment-utils').AttachmentItem[];
+  const tests = target.tests || [];
+  const media = target.media || [];
+  const total = files.length + (target.kind === 'event' ? tests.length : media.length);
+
+  const header = (
+    <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+      <span className="min-w-0">
+        <span className="font-semibold text-sm flex items-center gap-1.5">
+          <Paperclip className="w-4 h-4" /> {t('attachedFiles', { n: total })}
+        </span>
+        <span className="block text-xs text-muted-foreground truncate">{target.title}</span>
+      </span>
+      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
+        <X className="w-4 h-4" />
+      </Button>
+    </div>
+  );
+
+  const rows = (
+    <div className="px-4 pb-6 flex flex-col gap-2">
+      {files.length > 0 && (
+        <div className="pt-2 -mx-1">
+          <AttachmentsList items={files} />
+        </div>
+      )}
+      {target.kind === 'event' && (
+        tests.length === 0 && files.length === 0
+          ? <p className="text-sm text-muted-foreground text-center py-8">{t('smmEventTestsNone')}</p>
+          : tests.map(tt => (
+            <div key={tt.id} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
+              <span className="w-10 h-10 rounded-xl bg-[#DFF3E8] flex items-center justify-center shrink-0"><ClipboardList className="w-5 h-5 text-cta" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold truncate">{tt.title}</p>
+                <p className="text-xs text-muted-foreground">{t('smmTestQuestions', { n: tt.questions ?? 0 })}</p>
+              </div>
+            </div>
+          ))
+      )}
+      {target.kind === 'post' && (
+        media.length === 0 && files.length === 0
+          ? <p className="text-sm text-muted-foreground text-center py-8">{t('smmProfileNothing')}</p>
+          : media.map((m, i) => (
+            m.type === 'image' ? (
+              <button key={i} type="button" onClick={() => onOpenImage(mediaSrc(m.url))} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3 text-left hover:border-black/30 transition-colors">
+                <span className="w-10 h-10 rounded-xl overflow-hidden shrink-0"><img src={mediaSrc(m.url)} alt="" className="w-full h-full object-cover" /></span>
+                <span className="min-w-0 flex-1 text-sm font-bold truncate">{t('smmPhoto')}</span>
+              </button>
+            ) : (
+              <div key={i} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
+                <span className="w-10 h-10 rounded-xl bg-[#FFF0D9] flex items-center justify-center shrink-0"><Film className="w-5 h-5 text-cta" /></span>
+                <span className="min-w-0 flex-1 text-sm font-bold truncate">{t('smmVideo')}</span>
+              </div>
+            )
+          ))
+      )}
+    </div>
+  );
+
+  if (isDesktop) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-end p-5 pointer-events-none">
+        <div className={`pointer-events-auto ${open ? 'animate-in fade-in slide-in-from-right-2 duration-300' : 'animate-out fade-out slide-out-to-right-2 pointer-events-none duration-200'}`}>
+          <div className="rounded-4xl border border-black bg-white flex flex-col h-[680px] overflow-hidden w-[400px]">
+            {header}
+            <div className="flex-1 min-h-0 overflow-y-auto">{rows}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <ResizableSheetFrame
+      open={open}
+      onClose={onClose}
+      initialVh={0.78}
+      minVh={0.35}
+      header={header}
+      body={<div className="min-h-full">{rows}</div>}
+      footer={<span />}
+    />
   );
 }
 

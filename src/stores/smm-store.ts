@@ -25,15 +25,17 @@ export interface SmmCardChatTarget {
   title: string;
 }
 
-// The card whose files window is open (topWindow === 'files'): the event's
-// qualification tests OR the post's media collection (carried at open time —
-// no refetch needed, the card already holds them)
+// The card whose files window is open (topWindow === 'files'): the card's
+// «Прикреплённые файлы» (the SAME attachment shape the test files window
+// shows) + the event's qualification tests OR the post's media collection
+// (carried at open time — no refetch needed, the card already holds them)
 export interface SmmFilesTarget {
   kind: 'event' | 'post';
   id: string;
   title: string;
   tests?: { id: string; title: string; questions?: number }[];
   media?: { url: string; type: string }[];
+  files?: { title: string; type: 'audio' | 'video' | 'pdf' | 'image' | 'embed' | 'link'; url: string; size?: number | null }[];
 }
 
 // The event whose qualification tests the specialist is taking (заявка flow)

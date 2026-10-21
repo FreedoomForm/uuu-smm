@@ -228,9 +228,9 @@ export const api = {
   // description per role — ONE post per role.
   getPosts: (scope: 'mine' | 'user' = 'mine', userId?: string) =>
     apiFetch(`/smm/posts?scope=${scope}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}`) as Promise<{ items: import('@/lib/app-types').SmmPostT[] }>,
-  createPost: (data: { roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; description: string; media?: unknown; coverColor?: string | null; coverIcon?: string | null }) =>
+  createPost: (data: { roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; description: string; media?: unknown; attachments?: unknown; coverColor?: string | null; coverIcon?: string | null }) =>
     apiFetch('/smm/posts', { method: 'POST', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmPostT>,
-  updatePost: (id: string, data: { description?: string; media?: unknown; roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; coverColor?: string | null; coverIcon?: string | null }) =>
+  updatePost: (id: string, data: { description?: string; media?: unknown; attachments?: unknown; roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; coverColor?: string | null; coverIcon?: string | null }) =>
     apiFetch(`/smm/posts/${id}`, { method: 'PUT', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmPostT>,
   deletePost: (id: string) => apiFetch(`/smm/posts/${id}`, { method: 'DELETE' }),
 

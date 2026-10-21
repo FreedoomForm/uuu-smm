@@ -199,7 +199,7 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
         <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
         </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: (event.tests || []).length })} className={LADDER_BTN}>
+        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: (event.tests || []).length + ((event.attachments || []).length) })} className={LADDER_BTN}>
           <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
         </Button>
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
@@ -302,7 +302,7 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
         </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length })} className={LADDER_BTN}>
+        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length + ((post.attachments || []).length) })} className={LADDER_BTN}>
           <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
         </Button>
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>

@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import React, { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,10 +25,16 @@ import { tUI } from '@/lib/i18n';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
 import { useSmmStore, smmNow } from '@/stores/smm-store';
-import { ArrowLeft, Check, Film, Image as ImgIcon, Loader2, MapPin, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Film, Image as ImgIcon, Loader2, MapPin, Paperclip, Plus, Trash2 } from 'lucide-react';
 import LangButton from '@/components/lang-button';
+import { Collapse } from '@/components/motion';
 import { SMM_PLATFORMS, eventPlatformIcon, eventPlatformLabel, mapEmbedUrl, mediaSrc, fmtMoney } from './smm-bits';
-import type { SmmEventT, SmmPostT, SmmPostMedia } from '@/lib/app-types';
+import type { SmmEventT, SmmPostT, SmmPostMedia, SmmAttachmentT } from '@/lib/app-types';
+import type { AttachmentItem } from '@/components/attachment-utils';
+
+// The «Прикреплённые файлы» editor — the SAME component the test editor
+// embeds (rows + «Add by link» / «Upload file», live upload spinners).
+const AttachmentsEditor = dynamic(() => import('@/components/attachments').then(m => m.AttachmentsEditor), { ssr: false, loading: () => null });
 
 const COVER_COLORS = ['#E3EEFF', '#DFF3E8', '#FFF0D9', '#FCE8F2', '#FFE3D6', '#E8E3FF'];
 
@@ -76,6 +83,41 @@ function useT() {
   return { t, lang, cycleLang };
 }
 
+// ── THE «ПРИКРЕПЛЁННЫЕ ФАЙЛЫ» SECTION OF EVERY CREATE/EDIT PAGE ───────────
+// The same collapsed-to-one-line card the test editor keeps: Paperclip +
+// «Прикреплённые файлы (N)» header, the hint line and the SAME
+// AttachmentsEditor inside (add by link / upload a file / reorder rows).
+function EditorFilesSection({ items, onChange, t }: {
+  items: AttachmentItem[];
+  onChange: (items: AttachmentItem[]) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <Card className="rounded-4xl border border-black bg-white overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-1.5 px-4 sm:px-6 py-4 text-left hover:bg-muted/50 transition-colors"
+      >
+        <Paperclip className="w-4 h-4 shrink-0" />
+        <span className="font-semibold text-base">{t('attachedFiles', { n: items.length })}</span>
+        {expanded ? (
+          <ChevronDown className="w-4 h-4 ml-auto shrink-0" />
+        ) : (
+          <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
+        )}
+      </button>
+      <Collapse open={expanded} keepMountedOnceShown>
+        <CardContent className="pt-0">
+          <p className="text-xs text-muted-foreground mb-3">{t('smmFilesHint')}</p>
+          <AttachmentsEditor items={items} onChange={onChange} />
+        </CardContent>
+      </Collapse>
+    </Card>
+  );
+}
+
 // ── EVENT EDITOR ────────────────────────────────────────────────────────────
 
 export function SmmEventEditor() {
@@ -91,6 +133,7 @@ export function SmmEventEditor() {
   const [location, setLocation] = useState('');
   const [timeAt, setTimeAt] = useState('');
   const [testIds, setTestIds] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [myTests, setMyTests] = useState<{ id: string; title: string; q: number }[]>([]);
   const [coverColor, setCoverColor] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(true);
@@ -112,12 +155,13 @@ export function SmmEventEditor() {
         setTitle(e.title); setSummary(e.summary || '');
         setFormat(e.format || 'online'); setPlatform(e.platform || 'instagram');
         setLocation(e.location || ''); setTimeAt(e.timeAt || '');
-        setTestIds(e.testIds || []); setCoverColor(e.coverColor || null);
+        setTestIds(e.testIds || []); setAttachments(((e as SmmEventT).attachments || []) as AttachmentItem[]);
+        setCoverColor(e.coverColor || null);
         setIsPublic(e.isPublic !== false);
       }).catch(() => setPage('dashboard')).finally(() => setLoading(false));
     } else {
       setTitle(''); setSummary(''); setFormat('online'); setPlatform('instagram');
-      setLocation(''); setTimeAt(''); setTestIds([]); setCoverColor(null); setIsPublic(true);
+      setLocation(''); setTimeAt(''); setTestIds([]); setAttachments([]); setCoverColor(null); setIsPublic(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, myId]);
@@ -129,7 +173,7 @@ export function SmmEventEditor() {
   const save = async () => {
     if (!title.trim()) { window.dispatchEvent(new CustomEvent('smm-toast', { detail: t('smmEventTitle') })); return; }
     setSaving(true);
-    const payload = { title, summary, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, coverColor, isPublic };
+    const payload = { title, summary, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, attachments, coverColor, isPublic };
     try {
       if (editingId) await api.updateEvent(editingId, payload);
       else await api.createEvent(payload);
@@ -235,6 +279,10 @@ export function SmmEventEditor() {
           {testIds.length === 0 && myTests.length > 0 && <p className="text-xs text-muted-foreground">{t('smmEventTestsNone')}</p>}
         </CardContent>
       </Card>
+
+      {/* the «Прикреплённые файлы» section — the SAME one the test editor
+      keeps, present on every creation and editing page */}
+      <EditorFilesSection items={attachments} onChange={setAttachments} t={t} />
     </EditorShell>
   );
 }
@@ -254,6 +302,7 @@ export function SmmPostEditor() {
   const [pricePerDay, setPricePerDay] = useState('');
   const [description, setDescription] = useState('');
   const [media, setMedia] = useState<SmmPostMedia[]>([]);
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [mediaUrl, setMediaUrl] = useState('');
   const [mediaType, setMediaType] = useState<'video' | 'image'>('image');
   const [coverColor, setCoverColor] = useState<string | null>(null);
@@ -268,6 +317,7 @@ export function SmmPostEditor() {
         if (!post) { setPage('dashboard'); return; }
         setDescription(post.description || '');
         setMedia((post.media || []) as SmmPostMedia[]);
+        setAttachments((post.attachments || []) as AttachmentItem[]);
         setCoverColor(post.coverColor || null);
         if (post.role) {
           setRoleId(post.roleId);
@@ -277,7 +327,7 @@ export function SmmPostEditor() {
         }
       }).catch(() => setPage('dashboard'));
     } else {
-      setDescription(''); setMedia([]); setCoverColor(null);
+      setDescription(''); setMedia([]); setAttachments([]); setCoverColor(null);
       setRoleId(''); setNewRoleName(''); setPricePerK(''); setPricePerDay('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -314,9 +364,9 @@ export function SmmPostEditor() {
     setSaving(true);
     try {
       if (editingId) {
-        await api.updatePost(editingId, { role, description, media, coverColor });
+        await api.updatePost(editingId, { role, description, media, attachments, coverColor });
       } else {
-        await api.createPost({ roleId: roleId || undefined, role, description, media, coverColor });
+        await api.createPost({ roleId: roleId || undefined, role, description, media, attachments, coverColor });
       }
       window.dispatchEvent(new CustomEvent('smm-toast', { detail: t('smmPostSaved') }));
       useSmmStore.setState((s: any) => ({ editingId: null, refreshNonce: (s.refreshNonce || 0) + 1 }));
@@ -410,6 +460,10 @@ export function SmmPostEditor() {
           </div>
         </CardContent>
       </Card>
+
+      {/* the «Прикреплённые файлы» section — the SAME one the test editor
+      keeps, present on every creation and editing page */}
+      <EditorFilesSection items={attachments} onChange={setAttachments} t={t} />
     </EditorShell>
   );
 }

@@ -175,6 +175,10 @@ model SmmEvent {
   // Qualification tests the customer attached (their OWN tests, ordered):
   // the specialist passes them on the «подать заявку» screen.
   testIds      String[] @default([])
+  // The «Прикреплённые файлы» section of the event editor — the SAME
+  // attachment shape the test editor keeps (title/type/url/size/tgMessageId):
+  // audio, video, pdf, image, embed, link. Shown in the card's files window.
+  attachments  Json?
   coverColor   String?
   coverIcon    String?
   isPublic     Boolean  @default(true)
@@ -237,6 +241,10 @@ model SmmPost {
   description  String   @default("")
   // Media list: [{ url, type: "video"|"image", title? }] — tg:/data:/https:
   media        Json?
+  // The «Прикреплённые файлы» section of the post editor — the SAME
+  // attachment shape the test editor keeps; shown in the files window
+  // next to the media collection.
+  attachments  Json?
   coverColor   String?
   coverIcon    String?
   isPublic     Boolean  @default(true)
