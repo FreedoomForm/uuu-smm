@@ -906,6 +906,10 @@ export default function SmmDashboard() {
     // from here (the same пригласить bar the specialist card carries)
     if (topWindow === 'profile') {
       if (isSpecialist) return null;
+      // while the profile loads the invite target is unknown — an honest
+      // transient disable (the real states never disable: data arrived →
+      // the button invites; role-less user → the hint toast)
+      if (profileLoading) return { label: t('smmInviteBtn'), disabled: true, fn: () => {} };
       if (profileData && profileData.user.roles.length > 0) {
         const profileSp = { id: profileData.user.id, name: profileData.user.name, roles: profileData.user.roles };
         return { label: t('smmInviteBtn'), fn: () => inviteClick(profileSp) };
