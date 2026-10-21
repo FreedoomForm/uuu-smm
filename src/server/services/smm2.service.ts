@@ -725,3 +725,65 @@ export async function sendChatMessage(userId: string, chatId: string, text: stri
   await db.smmChat.update({ where: { id: chatId }, data: { lastMessageAt: new Date() } });
   return msg;
 }
+
+// ── CARD CHAT («Чат» on every card — the test-card group-chat mechanic) ─────
+// Everyone's chat about THIS card: messages live in SmmChatMessage with
+// scopeType = "event" | "post" | "specialist" and scopeId = the card id —
+// the same per-subject scope contract the schema was designed around.
+
+const CARD_SCOPES = ["event", "post", "specialist"] as const;
+
+async function assertCardScope(scopeType: string, scopeId: string) {
+  if (!(CARD_SCOPES as readonly string[]).includes(scopeType)) throw ApiError.badRequest("Bad scope");
+  if (scopeType === "event") {
+    const e = await db.smmEvent.findUnique({ where: { id: scopeId }, select: { id: true } });
+    if (!e) throw ApiError.notFound("Event not found");
+  } else if (scopeType === "post") {
+    const p = await db.smmPost.findUnique({ where: { id: scopeId }, select: { id: true } });
+    if (!p) throw ApiError.notFound("Post not found");
+  } else {
+    const u = await db.user.findUnique({ where: { id: scopeId }, select: { id: true } });
+    if (!u) throw ApiError.notFound("User not found");
+  }
+}
+
+export async function listCardChat(userId: string, scopeType: string, scopeId: string) {
+  await assertCardScope(scopeType, scopeId);
+  const messages = await db.smmChatMessage.findMany({
+    where: { scopeType, scopeId },
+    orderBy: { createdAt: "asc" },
+    take: 300,
+  });
+  return { messages };
+}
+
+export async function sendCardChat(userId: string, scopeType: string, scopeId: string, text: string) {
+  await assertCardScope(scopeType, scopeId);
+  const t = text.trim();
+  if (!t) throw ApiError.badRequest("Empty message");
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  return db.smmChatMessage.create({
+    data: { scopeType, scopeId, userId, userName: me?.name || "?", text: t.slice(0, 4000), kind: "text" },
+  });
+}
+
+// ── SPECIALIST CARD DELETE («Удалить» on the специалист card) ───────────────
+// A specialist card IS the user's marketplace presence: deleting your own
+// card removes your personal price-list roles (the ones without posts — a
+// role with a post must be cleared via its post first) and drops the
+// «specialist» flag, so the card leaves the публичная библиотека. Somebody
+// else's card is refused — the same owner-guard the test deletes keep.
+export async function deleteSpecialistCard(userId: string, id: string) {
+  if (id !== userId) throw ApiError.forbidden("Not your card");
+  const roles = await db.smmRole.findMany({
+    where: { ownerId: userId },
+    select: { id: true, name: true, _count: { select: { posts: true } } },
+  });
+  const withPosts = roles.filter((r) => r._count.posts > 0);
+  if (withPosts.length > 0) {
+    throw ApiError.badRequest("Remove the posts of these roles first: " + withPosts.map((r) => r.name).join(", "));
+  }
+  await db.smmRole.deleteMany({ where: { ownerId: userId } });
+  await db.user.updateMany({ where: { id: userId, smmRole: "specialist" }, data: { smmRole: "customer" } });
+  return { ok: true };
+}

@@ -14,7 +14,16 @@ export type SmmMode = 'specialist' | 'customer';
 // author window opened by tapping the author strip on any card; 'files' =
 // the attached files of ONE card — the event's qualification tests / the
 // post's media collection, the same contract the tests files window keeps)
-export type SmmTopWindow = 'none' | 'bookmarks' | 'chats' | 'requests' | 'profile' | 'files';
+export type SmmTopWindow = 'none' | 'bookmarks' | 'chats' | 'requests' | 'profile' | 'files' | 'card-chat';
+
+// The card whose GROUP chat window is open (topWindow === 'card-chat') —
+// the «Чат» button on every card opens everyone's chat about THIS card,
+// the same per-card mechanic the test cards keep (openCardGroupChat).
+export interface SmmCardChatTarget {
+  kind: 'event' | 'post' | 'specialist';
+  id: string;
+  title: string;
+}
 
 // The card whose files window is open (topWindow === 'files'): the event's
 // qualification tests OR the post's media collection (carried at open time —
@@ -78,6 +87,8 @@ interface SmmData {
   profileUserId: string | null;
   // The card whose files window is open (topWindow === 'files')
   filesTarget: SmmFilesTarget | null;
+  // The card whose group chat window is open (topWindow === 'card-chat')
+  cardChat: SmmCardChatTarget | null;
 }
 
 const INITIAL: SmmData = {
@@ -95,6 +106,7 @@ const INITIAL: SmmData = {
   editingId: null,
   profileUserId: null,
   filesTarget: null,
+  cardChat: null,
   applyResults: {},
 };
 

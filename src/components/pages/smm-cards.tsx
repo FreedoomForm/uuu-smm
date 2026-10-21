@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CreatorStrip } from '@/components/shared-bits';
 import { eventPlatformIcon, eventPlatformLabel, fmtMoney, mapEmbedUrl, mediaSrc } from './smm-bits';
-import { CalendarClock, ClipboardList, Bot, Film, LayoutGrid, Link2, MapPin, MessageCircle, Pencil, Star, Trash2, Users } from 'lucide-react';
+import { CalendarClock, ClipboardList, Bot, Film, LayoutGrid, Link2, MapPin, MessageCircle, Paperclip, Pencil, Star, Trash2, Users } from 'lucide-react';
 import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
 
 export type CardVariant = 'grid' | 'feed';
@@ -185,20 +185,23 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
           </div>
         </div>
       )}
-      {/* ladder — the same one-button-per-level order the test cards keep:
-      AI → Chat → Files → Share → Public → Edit → Delete */}
+      {/* ladder — the SAME ladder every card of the site carries, the test
+      card's one-button-per-level order: AI → Chat → Files → Share →
+      Public → Edit → Delete. The five buttons the user named — Чат, ИИ чат,
+      Прикреплённые файлы, Удалить, Изменить — stand on EVERY card ALWAYS;
+      each works exactly like its test-card counterpart (the group-chat
+      window, the AI panel, the files window, the delete dialog, the editor
+      — with the copy-then-edit rule for somebody else's card). */}
       <div className="card-ladder mt-auto pt-2 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
         <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
           <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
         </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('smmTopChats')} className={LADDER_BTN}>
+        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
         </Button>
-        {(event.tests?.length || 0) > 0 && (
-          <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('smmEventTests')} className={LADDER_BTN}>
-            <ClipboardList className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmEventTests')} ({event.tests!.length})</span>
-          </Button>
-        )}
+        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: (event.tests || []).length })} className={LADDER_BTN}>
+          <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
+        </Button>
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
           <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
         </Button>
@@ -207,16 +210,12 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
             <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
           </Button>
         )}
-        {own && (
-          <>
-            <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('smmEventEdit')} className={LADDER_BTN}>
-              <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
-            </Button>
-            <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmEventDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
-              <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
-            </Button>
-          </>
-        )}
+        <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
+          <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
+        </Button>
+        <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmEventDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
+          <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
+        </Button>
       </div>
     </div>
   );
@@ -300,27 +299,21 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
           <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
         </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('smmTopChats')} className={LADDER_BTN}>
+        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
         </Button>
-        {media.length > 0 && (
-          <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length })} className={LADDER_BTN}>
-            <Film className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('attachedFiles', { n: media.length })}</span>
-          </Button>
-        )}
+        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length })} className={LADDER_BTN}>
+          <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
+        </Button>
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
           <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
         </Button>
-        {own && (
-          <>
-            <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('smmPostEdit')} className={LADDER_BTN}>
-              <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
-            </Button>
-            <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmPostDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
-              <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
-            </Button>
-          </>
-        )}
+        <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('smmPostEdit')} className={LADDER_BTN}>
+          <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
+        </Button>
+        <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmPostDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
+          <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
+        </Button>
       </div>
     </div>
   );
@@ -388,8 +381,17 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
         <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
           <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
         </Button>
-        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('smmTopChats')} className={LADDER_BTN}>
+        <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('chatWithAll')} className={LADDER_BTN}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
+        </Button>
+        <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('gFiles')} className={LADDER_BTN}>
+          <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
+        </Button>
+        <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
+          <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
+        </Button>
+        <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmSpecialistDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
+          <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
         </Button>
       </div>
     </div>

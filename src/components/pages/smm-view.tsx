@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { tUI } from '@/lib/i18n';
@@ -86,6 +87,7 @@ export default function SmmDashboard() {
   const openChatId = useSmmStore(s => s.openChatId);
   const profileUserId = useSmmStore(s => s.profileUserId);
   const filesTarget = useSmmStore(s => s.filesTarget);
+  const cardChat = useSmmStore(s => s.cardChat);
 
   // ── data ────────────────────────────────────────────────────────────────
   const [items, setItems] = useState<AnyItem[]>([]);
@@ -109,6 +111,14 @@ export default function SmmDashboard() {
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [imgPreview, setImgPreview] = useState<string | null>(null);
+  // The card's GROUP chat window («Чат» on the card — the test-card
+  // mechanic): messages + input + poll, the same contract as the open chat.
+  const [cardMessages, setCardMessages] = useState<import('@/lib/app-types').SmmChatMessageT[]>([]);
+  const [cardInput, setCardInput] = useState('');
+  const cardEndRef = useRef<HTMLDivElement | null>(null);
+  // The delete dialog («Удалить» on the card — the same confirm-first dialog
+  // the test cards open before deleting)
+  const [smmDelete, setSmmDelete] = useState<{ kind: 'event' | 'post' | 'specialist'; id: string; title: string } | null>(null);
 
   // ── «Обсудить с ИИ» window state (per-card threads in localStorage) ──
   const [aiOpen, setAiOpen] = useState(false);
@@ -214,6 +224,36 @@ export default function SmmDashboard() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [chatMessages.length, openChatId]);
 
+  // open the CARD's group chat messages + poll (the test-card «Чат» window)
+  useEffect(() => {
+    if (!cardChat) { setCardMessages([]); return; }
+    let alive = true;
+    const fetchMsgs = async () => {
+      try {
+        const r = await api.getSmmCardChat(cardChat.kind, cardChat.id);
+        if (alive) setCardMessages(r.messages || []);
+      } catch { /* ignore */ }
+    };
+    void fetchMsgs();
+    const iv = setInterval(fetchMsgs, 4000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [cardChat]);
+
+  useEffect(() => {
+    cardEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [cardMessages.length, cardChat?.id]);
+
+  const sendCardChatMsg = async () => {
+    const text = cardInput.trim();
+    if (!text || !cardChat) return;
+    setCardInput('');
+    try {
+      await api.sendSmmCardChat(cardChat.kind, cardChat.id, text);
+      const r = await api.getSmmCardChat(cardChat.kind, cardChat.id);
+      setCardMessages(r.messages || []);
+    } catch { /* ignore */ }
+  };
+
   // load / persist the SMM AI threads (localStorage, session-safe)
   useEffect(() => {
     try { const raw = localStorage.getItem('smm-ai-threads'); if (raw) setAiThreads(JSON.parse(raw)); } catch { /* ignore */ }
@@ -258,14 +298,14 @@ export default function SmmDashboard() {
     useSmmStore.setState({
       smmMode: m, topWindow: 'none', editMode: false, activeCardId: null,
       pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, openChatId: null,
-      profileUserId: null, filesTarget: null,
+      profileUserId: null, filesTarget: null, cardChat: null,
     });
     api.setSmmMode(m).catch(() => {});
   };
 
   const gotoLibrary = (discover: boolean) => {
     setDiscoverMode(discover);
-    useSmmStore.setState({ topWindow: 'none', activeCardId: null, openChatId: null, pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, profileUserId: null, filesTarget: null });
+    useSmmStore.setState({ topWindow: 'none', activeCardId: null, openChatId: null, pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, profileUserId: null, filesTarget: null, cardChat: null });
   };
 
   const toggleBookmark = async (targetType: 'event' | 'specialist' | 'post', targetId: string) => {
@@ -525,6 +565,20 @@ export default function SmmDashboard() {
           },
           topWindow: 'files', openChatId: null,
         });
+      } else {
+        // the specialist card: the files window carries the media of THEIR
+        // posts (the profile API returns the posts with the media)
+        setBusy(true);
+        api.getSmmProfile(it.id)
+          .then((p: any) => {
+            const media = (p.posts || []).flatMap((pp: any) => ((pp.media || []) as { url: string; type: string }[]));
+            useSmmStore.setState({
+              filesTarget: { kind: 'post', id: it.id, title: it.name, media: media.slice(0, 60) },
+              topWindow: 'files', openChatId: null,
+            });
+          })
+          .catch((e: any) => toast(e?.message || 'Error'))
+          .finally(() => setBusy(false));
       }
     },
     isPublic: it.kind === 'event' ? (it as SmmEventT).isPublic : undefined,
@@ -535,20 +589,56 @@ export default function SmmDashboard() {
         .catch((e: any) => toast(e?.message || 'Error'));
     },
     onChat: () => {
-      if (it.kind === 'event') { if (it.customerId !== myId) void openDirectChat(it.customerId); }
-      else if (it.kind === 'post') { if (it.specialistId !== myId) void openDirectChat(it.specialistId); }
-      else { if (it.id !== myId) void openDirectChat(it.id); }
+      // «Чат» on the card = the per-card GROUP CHAT WINDOW — everyone's chat
+      // about THIS card, the exact mechanic the test cards keep. One window
+      // at a time: the AI panel closes (the same rule the test card keeps).
+      setAiOpen(false);
+      const title = it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name;
+      useSmmStore.setState({ cardChat: { kind: it.kind, id: it.id, title }, topWindow: 'card-chat', openChatId: null });
     },
     onShare: () => { if (it.kind !== 'specialist') void doShare(it.kind, it.id); },
     onEdit: () => {
-      if (it.kind === 'post') { useSmmStore.setState({ editingId: it.id }); setPage('smm-post-editor'); }
-      else if (it.kind === 'event') { useSmmStore.setState({ editingId: it.id }); setPage('smm-event-editor'); }
+      if (it.kind === 'post') {
+        if (it.specialistId === myId) { useSmmStore.setState({ editingId: it.id }); setPage('smm-post-editor'); }
+        else {
+          // Somebody else's post is NEVER edited in place — the test-card
+          // rule: «Изменить» makes a private copy and opens THAT copy.
+          setBusy(true);
+          toast(t('copyCreating'));
+          api.createPost({
+            role: { name: it.role?.name || t('smmPost'), pricePerK: it.role?.pricePerK ?? undefined, pricePerDay: it.role?.pricePerDay ?? undefined },
+            description: it.description, media: it.media || [], coverColor: it.coverColor || null, coverIcon: it.coverIcon || null,
+          })
+            .then((p: any) => { toast(t('copyCreated')); useSmmStore.setState({ editingId: p.id }); setPage('smm-post-editor'); bumpAndReload(); })
+            .catch((e: any) => toast(e?.message || 'Error'))
+            .finally(() => setBusy(false));
+        }
+      } else if (it.kind === 'event') {
+        if (it.customerId === myId) { useSmmStore.setState({ editingId: it.id }); setPage('smm-event-editor'); }
+        else {
+          setBusy(true);
+          toast(t('copyCreating'));
+          api.createEvent({
+            title: it.title, summary: it.summary, brief: it.brief || '', format: it.format, platform: it.platform,
+            location: it.location, timeAt: it.timeAt, testIds: it.testIds || [],
+            coverColor: it.coverColor || null, coverIcon: it.coverIcon || null, isPublic: false,
+          })
+            .then((ev: any) => { toast(t('copyCreated')); useSmmStore.setState({ editingId: ev.id }); setPage('smm-event-editor'); bumpAndReload(); })
+            .catch((e: any) => toast(e?.message || 'Error'))
+            .finally(() => setBusy(false));
+        }
+      } else {
+        // The specialist card is edited through YOUR profile (name/avatar);
+        // a stranger's card can never be changed.
+        if (it.id === myId) setPage('profile');
+        else toast(t('smmEditOwnOnly'));
+      }
     },
     onDelete: () => {
-      setBusy(true);
-      const done = () => { setBusy(false); bumpAndReload(); };
-      if (it.kind === 'post') api.deletePost(it.id).then(done).catch((e: any) => { setBusy(false); toast(e?.message || 'Error'); });
-      else if (it.kind === 'event') api.deleteEvent(it.id).then(done).catch((e: any) => { setBusy(false); toast(e?.message || 'Error'); });
+      // «Удалить» opens the same confirm-first dialog the test cards open —
+      // the delete itself happens only after the confirmation.
+      const title = it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name;
+      setSmmDelete({ kind: it.kind, id: it.id, title });
     },
     onOpen: () => {
       useSmmStore.setState({ activeCardId: it.id });
@@ -576,6 +666,22 @@ export default function SmmDashboard() {
     useSmmStore.setState((s: any) => ({ refreshNonce: (s.refreshNonce || 0) + 1 }));
     if (topWindow === 'chats') void loadChats();
     if (topWindow === 'requests') void loadRequests();
+  };
+
+  // The delete dialog's confirm — the same mechanic the test cards keep:
+  // the card disappears only after the user confirms in the dialog.
+  const confirmSmmDelete = async () => {
+    if (!smmDelete) return;
+    const d = smmDelete;
+    setSmmDelete(null);
+    setBusy(true);
+    try {
+      if (d.kind === 'event') { await api.deleteEvent(d.id); toast(t('smmEventDeleted')); }
+      else if (d.kind === 'post') { await api.deletePost(d.id); toast(t('smmPostDeleted')); }
+      else { await api.deleteSpecialistCard(d.id); toast(t('smmSpecialistDeleted')); }
+      bumpAndReload();
+    } catch (e: any) { toast(e?.message || 'Error'); }
+    setBusy(false);
   };
 
   // ── the first bottom bar (context action) ───────────────────────────────
@@ -617,6 +723,7 @@ export default function SmmDashboard() {
     : topWindow === 'chats' ? t('smmTopChats')
     : topWindow === 'requests' ? t('smmRequestsMine')
     : topWindow === 'profile' ? t('smmViewProfile')
+    : topWindow === 'card-chat' ? t('gChat')
     : topWindow === 'files' ? (filesTarget?.kind === 'event' ? t('smmEventTests') : t('gFiles')) : null;
 
   const renderCard = (it: AnyItem, selected: boolean, variant: 'grid' | 'feed') => {
@@ -665,6 +772,40 @@ export default function SmmDashboard() {
                     )
                   ))
               )}
+            </div>
+          </div>
+        );
+      }
+      // ── the ОКНО ГРУППОВОГО ЧАТА КАРТОЧКИ («Чат» on the card — everyone's
+      // chat about THIS card, the same per-card window the test cards open) ──
+      if (topWindow === 'card-chat' && cardChat) {
+        return (
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
+              <div className="max-w-2xl mx-auto flex flex-col gap-2">
+                <p className="text-sm font-bold text-muted-foreground px-1 truncate">{cardChat.title}</p>
+                {cardMessages.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">—</p>}
+                {cardMessages.map(m => {
+                  const mine = m.userId === myId;
+                  return (
+                    <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.kind === 'system' ? 'bg-[#FFF0D9] border border-black/10 text-black/80' : mine ? 'bg-cta text-white' : 'bg-muted'}`}>
+                        {!mine && m.kind !== 'system' && <p className="text-[10px] font-bold opacity-70 mb-0.5">{m.userName}</p>}
+                        <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={cardEndRef} />
+              </div>
+            </div>
+            <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-3 py-2" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
+              <div className="max-w-2xl mx-auto flex gap-2">
+                <Input value={cardInput} onChange={e => setCardInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendCardChatMsg(); } }}
+                  placeholder={t('smmChatMessage')} className="h-9 rounded-full bg-white border-black/15" />
+                <Button size="sm" onClick={sendCardChatMsg} className="h-9 rounded-full shrink-0"><Send className="w-4 h-4" /></Button>
+              </div>
             </div>
           </div>
         );
@@ -935,7 +1076,7 @@ export default function SmmDashboard() {
           <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
             {(topWindow !== 'none' || openChatId) && (
               <Button variant="outline" size="icon"
-                onClick={() => { if (openChatId) useSmmStore.setState({ openChatId: null }); else useSmmStore.setState({ topWindow: 'none' }); }}
+                onClick={() => { if (openChatId) useSmmStore.setState({ openChatId: null }); else if (cardChat) useSmmStore.setState({ cardChat: null, topWindow: 'none' }); else useSmmStore.setState({ topWindow: 'none' }); }}
                 className="rounded-full shrink-0 border-black lg:h-10 lg:w-10" title={t('back')} aria-label={t('back')}>
                 <ArrowLeft className="w-4 h-4" />
               </Button>
@@ -1052,6 +1193,23 @@ export default function SmmDashboard() {
           </Button>
         </div>
       )}
+      {/* THE DELETE DIALOG — «Удалить» from any card opens the same
+      confirm-first dialog the test cards keep: the card disappears only
+      after the confirmation, and the server still refuses a stranger's card. */}
+      <AlertDialog open={!!smmDelete} onOpenChange={() => setSmmDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('smmDeleteQ')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {smmDelete?.title ? `«${smmDelete.title}» · ` : ''}{t('smmDeleteWarning')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmSmmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('gDelete')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* «Обсудить с ИИ» — the SAME panel the test cards open */}
       <AiChatPanel
         open={aiOpen}

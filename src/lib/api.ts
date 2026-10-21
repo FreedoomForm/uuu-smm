@@ -297,4 +297,15 @@ export const api = {
     apiFetch(`/smm/chats/${id}/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`) as Promise<{ messages: import('@/lib/app-types').SmmChatMessageT[] }>,
   sendSmmChatMessage: (id: string, text: string) =>
     apiFetch(`/smm/chats/${id}/messages`, { method: 'POST', body: JSON.stringify({ text }) }) as Promise<import('@/lib/app-types').SmmChatMessageT>,
+
+  // Card chat («Чат» on every card): everyone's group chat about THIS card —
+  // the same per-card mechanic the test cards keep.
+  getSmmCardChat: (scopeType: 'event' | 'post' | 'specialist', scopeId: string) =>
+    apiFetch(`/smm/card-chat?scopeType=${encodeURIComponent(scopeType)}&scopeId=${encodeURIComponent(scopeId)}`) as Promise<{ messages: import('@/lib/app-types').SmmChatMessageT[] }>,
+  sendSmmCardChat: (scopeType: 'event' | 'post' | 'specialist', scopeId: string, text: string) =>
+    apiFetch('/smm/card-chat', { method: 'POST', body: JSON.stringify({ scopeType, scopeId, text }) }) as Promise<import('@/lib/app-types').SmmChatMessageT>,
+
+  // The specialist card's «Удалить»: removes your OWN marketplace presence
+  // (personal price-list roles without posts + the «specialist» flag).
+  deleteSpecialistCard: (id: string) => apiFetch(`/smm/specialists/${id}`, { method: 'DELETE' }),
 };
