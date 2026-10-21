@@ -899,13 +899,13 @@ export default function SmmDashboard() {
                   {profileData.posts.length > 0 && (
                     <>
                       <h3 className="text-sm font-bold text-muted-foreground px-1">{t('smmPosts')}</h3>
-                      {profileData.posts.map(p => renderCard({ kind: 'post', ...p } as AnyItem, false, 'feed'))}
+                      {profileData.posts.map(p => renderCard({ ...p, kind: 'post' } as AnyItem, false, 'feed'))}
                     </>
                   )}
                   {profileData.events.length > 0 && (
                     <>
                       <h3 className="text-sm font-bold text-muted-foreground px-1">{t('smmEvents')}</h3>
-                      {profileData.events.map(e => renderCard({ kind: 'event', ...e } as AnyItem, false, 'feed'))}
+                      {profileData.events.map(e => renderCard({ ...e, kind: 'event' } as AnyItem, false, 'feed'))}
                     </>
                   )}
                   {profileData.posts.length === 0 && profileData.events.length === 0 && (
