@@ -34,7 +34,9 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, Film, Image as ImgIcon, Lo
 import LangButton from '@/components/lang-button';
 import { Collapse } from '@/components/motion';
 import { SMM_PLATFORMS, eventPlatformIcon, eventPlatformLabel, mapEmbedUrl, mediaSrc, fmtMoney } from './smm-bits';
-import type { SmmEventT, SmmPostT, SmmPostMedia, SmmAttachmentT } from '@/lib/app-types';
+import { InlineQuestionsSection, questionHasContent } from './smm-inline-test';
+import { EMPTY_QUESTION } from '@/stores/editor-store';
+import type { SmmEventT, SmmPostT, SmmPostMedia, SmmAttachmentT, Question } from '@/lib/app-types';
 import type { AttachmentItem } from '@/components/attachment-utils';
 
 // The «Прикреплённые файлы» editor — the SAME component the test editor
@@ -166,8 +168,22 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
   const [isVersion, setIsVersion] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  // The INLINE test builder — the «Вопросы» section carried over from the
+  // test-creation page. Toggled by the card's «Создать тест» button (NO
+  // navigation away): the questions are written right here and the test is
+  // born when the event is saved, its id joining the picked ones.
+  const [inlineOn, setInlineOn] = useState(false);
+  const [inlineTitle, setInlineTitle] = useState('');
+  const [inlineQuestions, setInlineQuestions] = useState<Question[]>([{ ...EMPTY_QUESTION }]);
+  const [inlineBusy, setInlineBusy] = useState(false); // a photo is mid-upload
+
+  const resetInlineTest = () => {
+    setInlineOn(false); setInlineTitle('');
+    setInlineQuestions([{ ...EMPTY_QUESTION }]); setInlineBusy(false);
+  };
 
   useEffect(() => {
+    resetInlineTest(); // a fresh event (or a different one) — builder closed
     // my tests for the qualification picker
     api.getTests(myId || undefined).then((r: any) => {
       const arr = Array.isArray(r) ? r : (r?.items || []);
@@ -201,13 +217,52 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
   const save = async () => {
     if (!title.trim()) { smmToast(t('smmEventTitle')); return; }
     setSaving(true); onSaving?.(true);
-    const payload = { title, summary, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, attachments, coverColor, isPublic };
     try {
+      // The inline builder first: when it carries content, the qualification
+      // test is created BEFORE the event (the same validation the test editor
+      // enforces: title + every question needs text and options A–D) and its
+      // id joins the picked testIds. An untouched builder is skipped.
+      let finalTestIds = [...testIds];
+      if (inlineOn) {
+        const written = inlineQuestions.filter(questionHasContent);
+        if (inlineTitle.trim() || written.length > 0) {
+          if (inlineBusy) { smmToast(t('uploadInProgress')); return; }
+          if (!inlineTitle.trim()) { smmToast(t('titleRequired')); return; }
+          if (written.some(q => !q.text || !q.optionA || !q.optionB || !q.optionC || !q.optionD)) {
+            smmToast(t('allQuestionsNeed')); return;
+          }
+          const created: any = await api.createTest({
+            title: inlineTitle.trim(),
+            description: '',
+            tags: [],
+            isPublic: true,
+            randomizeQuestions: true,
+            randomizeOptions: true,
+            questions: written.map((q, i) => ({
+              text: q.text,
+              optionA: q.optionA,
+              optionB: q.optionB,
+              optionC: q.optionC,
+              optionD: q.optionD,
+              optionE: null,
+              correctAnswer: q.correctAnswer,
+              explanation: null,
+              translations: null,
+              imageUrl: q.imageUrl ?? null,
+              imageMsgId: q.imageMsgId ?? null,
+              optionImages: q.optionImages ?? null,
+              orderNum: i,
+            })),
+          });
+          if (created?.id) finalTestIds = [...finalTestIds, created.id];
+        }
+      }
+      const payload = { title, summary, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds: finalTestIds, attachments, coverColor, isPublic };
       const saved = editingId ? await api.updateEvent(editingId, payload) : await api.createEvent(payload);
       smmToast(t('smmEventSaved'));
       onSaved(saved as SmmEventT);
     } catch (e: any) {
-      smmToast(e?.message || 'Error');
+      smmToast(e?.message === 'PUBLISH_NAME_TAKEN' ? t('publishNameTaken') : (e?.message || 'Error'));
     } finally {
       setSaving(false); onSaving?.(false);
     }
@@ -286,12 +341,22 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
         </CardContent>
       </Card>
 
-      {/* qualification tests picker */}
+      {/* qualification tests picker — the «Создать тест» button does NOT
+      navigate to the test page: it opens the inline «Вопросы» section
+      (carried over 1:1 from the test editor) right here; the test is born
+      on save and its id joins the picked ones */}
       <Card className="rounded-4xl border border-black bg-white">
         <CardContent className="p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
             <Label className="text-sm font-bold">{t('smmEventTests')}</Label>
-            <EventTestCreateButton t={t} />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setInlineOn(v => !v)}
+              className={`h-8 rounded-full text-xs ${inlineOn ? 'bg-cta text-white border-cta hover:bg-cta/90' : 'border-black'}`}
+            >
+              <Plus className="size-3.5" /> {t('smmEventTestsCreate')}
+            </Button>
           </div>
           <p className="text-xs text-muted-foreground">{t('smmEventTestsHint')}</p>
           {myTests.length === 0 && <p className="text-xs text-muted-foreground">{t('smmEventTestsNone')}</p>}
@@ -305,6 +370,23 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
             ))}
           </div>
           {testIds.length === 0 && myTests.length > 0 && <p className="text-xs text-muted-foreground">{t('smmEventTestsNone')}</p>}
+          {/* The inline builder: the test title + the «Вопросы» section — the
+          question text and the A–D answer options are written INSIDE the
+          event form, exactly as on the test-creation page. */}
+          <Collapse open={inlineOn} keepMountedOnceShown>
+            <div className="flex flex-col gap-3 border-t border-black/10 pt-3">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-sm font-bold">{t('testTitle')}</Label>
+                <Input value={inlineTitle} onChange={e => setInlineTitle(e.target.value)} placeholder={t('testTitlePh')} className="h-10 rounded-2xl border-black/20 bg-white" />
+              </div>
+              <InlineQuestionsSection
+                questions={inlineQuestions}
+                onChange={setInlineQuestions}
+                t={t}
+                onBusyChange={setInlineBusy}
+              />
+            </div>
+          </Collapse>
         </CardContent>
       </Card>
 
@@ -314,17 +396,6 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
     </>
   );
 });
-
-// The «create a test» button inside the qualification picker (page editor
-// navigates to the test editor; kept out of the form to not re-render it).
-function EventTestCreateButton({ t }: { t: (key: string, vars?: Record<string, string | number>) => string }) {
-  const setPage = useNavStore(s => s.setPage);
-  return (
-    <Button size="sm" variant="outline" onClick={() => setPage('create-test')} className="h-8 rounded-full border-black text-xs">
-      <Plus className="size-3.5" /> {t('smmEventTestsCreate')}
-    </Button>
-  );
-}
 
 // ── EVENT PAGE EDITOR (the «+» create flow — the full page) ─────────────────
 
