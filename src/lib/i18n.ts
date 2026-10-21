@@ -453,6 +453,9 @@ const en: Dict = {
   smmViewProfile: 'Profile',
   smmProfileNothing: 'Nothing published yet',
   smmProfileOpenChats: 'Write a message',
+  smmTestQuestions: '{n} questions',
+  smmPhoto: 'Photo',
+  smmVideo: 'Video',
   smmAuthor: 'Author',
 };
 
@@ -872,6 +875,9 @@ const ru: Dict = {
   smmViewProfile: 'Профиль',
   smmProfileNothing: 'Пока ничего не опубликовано',
   smmProfileOpenChats: 'Написать сообщение',
+  smmTestQuestions: '{n} вопросов',
+  smmPhoto: 'Фото',
+  smmVideo: 'Видео',
   smmAuthor: 'Автор',
 };
 
@@ -1289,6 +1295,9 @@ const uz: Dict = {
   smmViewProfile: 'Profil',
   smmProfileNothing: 'Hali hech narsa joylanmagan',
   smmProfileOpenChats: 'Xabar yozish',
+  smmTestQuestions: '{n} savol',
+  smmPhoto: 'Foto',
+  smmVideo: 'Video',
   smmAuthor: 'Muallif',
 };
 

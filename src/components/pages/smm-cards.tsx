@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CreatorStrip } from '@/components/shared-bits';
 import { eventPlatformIcon, eventPlatformLabel, fmtMoney, mapEmbedUrl, mediaSrc } from './smm-bits';
-import { CalendarClock, ClipboardList, Film, LayoutGrid, Link2, MapPin, MessageCircle, Pencil, Star, Trash2, Users } from 'lucide-react';
+import { CalendarClock, ClipboardList, Bot, Film, LayoutGrid, Link2, MapPin, MessageCircle, Pencil, Star, Trash2, Users } from 'lucide-react';
 import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
 
 export type CardVariant = 'grid' | 'feed';
@@ -42,6 +42,16 @@ export interface CardCtx {
   onEdit: () => void;
   onDelete: () => void;
   onOpen: () => void;
+  // «Обсудить с ИИ» — the same AI discussion the test cards open
+  onAi: () => void;
+  aiActive: boolean;
+  // «Прикреплённые файлы (N)» — the event's qualification tests / the post's
+  // media collection (the card renders the button when ITS count > 0)
+  onFiles: () => void;
+  // «Опубликовать / Снять с публикации» — OWN мероприятие cards (the same
+  // Public level the own test cards keep)
+  isPublic?: boolean;
+  onPublic?: () => void;
   // event card (specialist side)
   myRoles: { id: string; name: string }[];
   pickedRole: string | null;
@@ -57,6 +67,8 @@ export interface CardCtx {
 }
 
 const LADDER_BTN = 'h-7 rounded-full border-black text-[10px] sm:text-[11px] lg:h-9 lg:text-xs px-1.5 justify-start gap-1 has-[>svg]:px-1 w-full';
+// The AI button wears the test card's active look when its window is open
+const LADDER_AI_ACTIVE = 'border-primary bg-[#FFE8DE]';
 
 // The SAME card header every card of the site wears (tests + SMM): the
 // gradient band with the author's photo and the bookmark toggle.
@@ -173,14 +185,28 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
           </div>
         </div>
       )}
-      {/* ladder — the same one-button-per-level order the test cards keep */}
+      {/* ladder — the same one-button-per-level order the test cards keep:
+      AI → Chat → Files → Share → Public → Edit → Delete */}
       <div className="card-ladder mt-auto pt-2 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
+        <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
+          <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
+        </Button>
         <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('smmTopChats')} className={LADDER_BTN}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
         </Button>
+        {(event.tests?.length || 0) > 0 && (
+          <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('smmEventTests')} className={LADDER_BTN}>
+            <ClipboardList className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmEventTests')} ({event.tests!.length})</span>
+          </Button>
+        )}
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
           <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
         </Button>
+        {own && (
+          <Button size="sm" variant="outline" onClick={ctx.onPublic} title={t('makePublic')} className={LADDER_BTN}>
+            <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
+          </Button>
+        )}
         {own && (
           <>
             <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('smmEventEdit')} className={LADDER_BTN}>
@@ -271,9 +297,17 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
       )}
       {post.description && <p className={`mt-2 text-xs sm:text-sm text-muted-foreground whitespace-pre-wrap ${isFeed ? 'line-clamp-6' : 'line-clamp-2'}`}>{post.description}</p>}
       <div className="card-ladder mt-auto pt-2 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
+        <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
+          <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
+        </Button>
         <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('smmTopChats')} className={LADDER_BTN}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
         </Button>
+        {media.length > 0 && (
+          <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length })} className={LADDER_BTN}>
+            <Film className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('attachedFiles', { n: media.length })}</span>
+          </Button>
+        )}
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
           <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
         </Button>
@@ -351,6 +385,9 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
         </div>
       </div>
       <div className="card-ladder mt-auto pt-2 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
+        <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
+          <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
+        </Button>
         <Button size="sm" variant="outline" onClick={ctx.onChat} title={t('smmTopChats')} className={LADDER_BTN}>
           <MessageCircle className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gChat')}</span>
         </Button>

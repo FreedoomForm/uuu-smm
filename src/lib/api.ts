@@ -258,6 +258,11 @@ export const api = {
   getSmmProfile: (userId: string) =>
     apiFetch(`/smm/profile?userId=${encodeURIComponent(userId)}`) as Promise<import('@/lib/app-types').SmmProfileT>,
 
+  // «Обсудить с ИИ» on the SMM cards: the AI holds the card's passport
+  // (event facts / post + role prices / specialist + roles) server-side.
+  smmCardChat: (kind: 'event' | 'post' | 'specialist', id: string, messages: { role: 'user' | 'assistant'; content: string }[]) =>
+    apiFetch('/smm/ai-chat', { method: 'POST', body: JSON.stringify({ kind, id, messages }) }) as Promise<{ response?: string; rateLimited?: boolean; error?: string }>,
+
   // Заявки (the specialist applies to an event with one of their roles)
   getApplications: () =>
     apiFetch('/smm/applications') as Promise<{ items: import('@/lib/app-types').SmmRequestRowT[] }>,

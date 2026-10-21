@@ -290,6 +290,101 @@ ${LATEX_RULE}`;
   return { response: normalizeMathNotation(aiResponse) };
 }
 
+// ------------------------------------------------------------- smm cards chat --
+
+// The «Обсудить с ИИ» button on the SMM cards (мероприятие / пост /
+// специалист): the same tutor contract as tutorChatAboutTest — the server
+// loads the card, builds ITS passport into the system prompt and answers
+// about THIS card (help the customer prepare / the specialist get ready /
+// discuss the terms).
+export async function smmCardChat(
+  userId: string,
+  kind: "event" | "post" | "specialist",
+  id: string,
+  messages: ChatTurn[]
+) {
+  let title = "";
+  let subject = "";
+
+  if (kind === "event") {
+    const ev = await db.smmEvent.findUnique({ where: { id } });
+    if (!ev) throw ApiError.notFound("Event not found");
+    title = ev.title;
+    subject = [
+      `Title: ${ev.title}`,
+      ev.summary ? `Summary: ${ev.summary.slice(0, 500)}` : "",
+      `Format: ${ev.format === "online" ? "online" : "offline"}`,
+      ev.format === "online" && ev.platform ? `Platform: ${ev.platform}` : "",
+      ev.format === "offline" && ev.location ? `Location: ${ev.location}` : "",
+      ev.timeAt ? `Time: ${ev.timeAt}` : "",
+      `Qualification tests attached: ${ev.testIds.length}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  } else if (kind === "post") {
+    const post = await db.smmPost.findUnique({
+      where: { id },
+      include: {
+        role: { select: { name: true, pricePerK: true, pricePerDay: true } },
+        specialist: { select: { name: true } },
+      },
+    });
+    if (!post) throw ApiError.notFound("Post not found");
+    title = post.role?.name || "Post";
+    subject = [
+      `Specialist: ${post.specialist?.name || "—"}`,
+      `Role: ${post.role?.name || "—"}`,
+      post.role?.pricePerK != null ? `Price per 1000 views (online): ${post.role.pricePerK}` : "",
+      post.role?.pricePerDay != null ? `Price per day 8 hours (offline): ${post.role.pricePerDay}` : "",
+      `Media attached: ${(post.media as unknown[] | null)?.length || 0}`,
+      post.description ? `Description: ${post.description.slice(0, 800)}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  } else {
+    const user = await db.user.findUnique({
+      where: { id },
+      select: {
+        name: true,
+        smmRating: true,
+        smmRoles: { select: { name: true, pricePerK: true, pricePerDay: true } },
+      },
+    });
+    if (!user) throw ApiError.notFound("User not found");
+    title = user.name;
+    const roles = (user.smmRoles || [])
+      .map(
+        (r) =>
+          `- ${r.name}: per 1000 views ${r.pricePerK ?? "—"}, per day (8h) ${r.pricePerDay ?? "—"}`
+      )
+      .join("\n");
+    subject = [
+      `Specialist: ${user.name}`,
+      `Rating: ${user.smmRating ?? "—"}`,
+      roles ? `Roles and prices:\n${roles}` : "No roles yet",
+    ].join("\n");
+  }
+
+  const systemPrompt = `You are the AI assistant of the SMM marketplace built on the tests site. The user opened the AI discussion about THIS ${kind}: "${title}". You KNOW everything the card shows:
+
+${subject}
+
+Answer the user's questions about THIS ${kind}: explain the details, help the customer prepare or choose, help the specialist get ready, discuss the terms and the platform, give practical SMM advice. Reply in the language the user writes in (Russian, English or Uzbek). Be concise, friendly and practical.
+
+${LATEX_RULE}`;
+
+  const conversationMessages = [
+    { role: "system" as const, content: systemPrompt },
+    ...messages.slice(-20).map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    })),
+  ];
+
+  const aiResponse = await callAIWithRetry(conversationMessages);
+  return { response: normalizeMathNotation(aiResponse) };
+}
+
 // ------------------------------------------------------------------ explain --
 
 export async function generateExplanations(

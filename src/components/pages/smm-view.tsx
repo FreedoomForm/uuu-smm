@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -24,7 +25,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { tUI } from '@/lib/i18n';
 import { CreatorStrip } from '@/components/shared-bits';
 import {
-  ArrowLeft, Compass, Edit, Library, LayoutGrid, Loader2, MessageCircle,
+  ArrowLeft, Compass, Edit, Film, Library, LayoutGrid, Loader2, MessageCircle,
   Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList,
 } from 'lucide-react';
 import { useSessionStore } from '@/stores/session-store';
@@ -33,10 +34,26 @@ import { useDashboardStore } from '@/stores/dashboard-store';
 import { useProfileStore } from '@/stores/profile-store';
 import { useSmmStore, smmNow, type SmmMode } from '@/stores/smm-store';
 import type { SmmChatT, SmmEventT, SmmPostT, SmmRequestRowT, SmmRoleT, SmmSpecialistT, SmmProfileT } from '@/lib/app-types';
+
+// The «Обсудить с ИИ» window — the SAME panel the test cards open (the
+// dynamic import keeps it out of the first paint, like app-root does)
+const AiChatPanel = dynamic(() => import('@/components/chat-panels').then(m => m.AiChatPanel), { ssr: false, loading: () => null });
+
+// One AI conversation about one SMM card (persisted in localStorage — the
+// same deal the test dashboard's threads keep, but scoped to the SMM page)
+interface SmmAiThread {
+  id: string; // `${kind}:${cardId}`
+  kind: 'event' | 'post' | 'specialist';
+  cardId: string;
+  title: string;
+  messages: { role: 'user' | 'assistant'; content: string }[];
+  updatedAt: number;
+}
+type AiMsg = { role: 'user' | 'assistant'; content: string };
 import {
   BookmarkRow, ChatRow, RequestRow, SmmEventCardView, SmmPostCardView, SmmSpecialistCardView, type CardCtx,
 } from './smm-cards';
-import { fmtMoney } from './smm-bits';
+import { fmtMoney, mediaSrc } from './smm-bits';
 
 type AnyItem = ({ kind: 'post' } & SmmPostT) | ({ kind: 'event' } & SmmEventT) | ({ kind: 'specialist' } & SmmSpecialistT);
 
@@ -68,6 +85,7 @@ export default function SmmDashboard() {
   const refreshNonce = useSmmStore(s => s.refreshNonce);
   const openChatId = useSmmStore(s => s.openChatId);
   const profileUserId = useSmmStore(s => s.profileUserId);
+  const filesTarget = useSmmStore(s => s.filesTarget);
 
   // ── data ────────────────────────────────────────────────────────────────
   const [items, setItems] = useState<AnyItem[]>([]);
@@ -91,6 +109,16 @@ export default function SmmDashboard() {
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [imgPreview, setImgPreview] = useState<string | null>(null);
+
+  // ── «Обсудить с ИИ» window state (per-card threads in localStorage) ──
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiTarget, setAiTarget] = useState<{ kind: 'event' | 'post' | 'specialist'; id: string; title: string } | null>(null);
+  const [aiMessages, setAiMessages] = useState<AiMsg[]>([]);
+  const [aiInput, setAiInput] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiHistoryOpen, setAiHistoryOpen] = useState(false);
+  const [aiThreads, setAiThreads] = useState<Record<string, SmmAiThread>>({});
+  const aiEndRef = useRef<HTMLDivElement | null>(null);
 
   const myId = effectiveUser?.id || '';
   const isSpecialist = smmMode === 'specialist';
@@ -186,6 +214,17 @@ export default function SmmDashboard() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [chatMessages.length, openChatId]);
 
+  // load / persist the SMM AI threads (localStorage, session-safe)
+  useEffect(() => {
+    try { const raw = localStorage.getItem('smm-ai-threads'); if (raw) setAiThreads(JSON.parse(raw)); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('smm-ai-threads', JSON.stringify(aiThreads)); } catch { /* ignore */ }
+  }, [aiThreads]);
+  useEffect(() => {
+    aiEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [aiMessages.length, aiOpen]);
+
   // ── derived ─────────────────────────────────────────────────────────────
   const q = search.trim().toLowerCase();
   const filtered = useMemo(() => {
@@ -219,14 +258,14 @@ export default function SmmDashboard() {
     useSmmStore.setState({
       smmMode: m, topWindow: 'none', editMode: false, activeCardId: null,
       pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, openChatId: null,
-      profileUserId: null,
+      profileUserId: null, filesTarget: null,
     });
     api.setSmmMode(m).catch(() => {});
   };
 
   const gotoLibrary = (discover: boolean) => {
     setDiscoverMode(discover);
-    useSmmStore.setState({ topWindow: 'none', activeCardId: null, openChatId: null, pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, profileUserId: null });
+    useSmmStore.setState({ topWindow: 'none', activeCardId: null, openChatId: null, pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, profileUserId: null, filesTarget: null });
   };
 
   const toggleBookmark = async (targetType: 'event' | 'specialist' | 'post', targetId: string) => {
@@ -263,6 +302,74 @@ export default function SmmDashboard() {
       toast(t('smmShareCopied'));
     } catch { toast(url); }
   };
+
+  // ── «Обсудить с ИИ» — the SAME window the test cards open, fed by the
+  // card's passport (/api/smm/ai-chat) ──
+  const openSmmAi = (kind: 'event' | 'post' | 'specialist', id: string, title: string) => {
+    const tid = `${kind}:${id}`;
+    const th = aiThreads[tid];
+    setAiTarget({ kind, id, title });
+    setAiMessages(th ? [...th.messages] : []);
+    setAiOpen(true);
+    setAiHistoryOpen(false);
+  };
+
+  const sendSmmAi = async (existing?: AiMsg[]) => {
+    if (!aiTarget) return;
+    let msgs: AiMsg[];
+    if (existing) {
+      msgs = existing;
+      setAiMessages(msgs);
+    } else {
+      if (!aiInput.trim()) return;
+      msgs = [...aiMessages, { role: 'user', content: aiInput.trim() }];
+      setAiMessages(msgs);
+      setAiInput('');
+    }
+    setAiLoading(true);
+    try {
+      const r = await api.smmCardChat(aiTarget.kind, aiTarget.id, msgs);
+      let final = msgs;
+      if (r.response) final = [...msgs, { role: 'assistant', content: r.response }];
+      else if ((r as any).rateLimited) final = [...msgs, { role: 'assistant', content: t('aiBusy') }];
+      else final = [...msgs, { role: 'assistant', content: (r as any).error || t('aiError') }];
+      setAiMessages(final);
+      const tid = `${aiTarget.kind}:${aiTarget.id}`;
+      setAiThreads(prev => ({
+        ...prev,
+        [tid]: { id: tid, kind: aiTarget.kind, cardId: aiTarget.id, title: aiTarget.title, messages: final, updatedAt: Date.now() },
+      }));
+    } catch (e: any) {
+      const errMsg = e?.message || '';
+      const txt = errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('Too many') ? t('aiBusy') : t('aiError');
+      setAiMessages(prev => [...prev, { role: 'assistant', content: txt }]);
+    }
+    setAiLoading(false);
+  };
+
+  const selectSmmAiThread = (tid: string) => {
+    const th = aiThreads[tid];
+    if (!th) return;
+    setAiTarget({ kind: th.kind, id: th.cardId, title: th.title });
+    setAiMessages([...th.messages]);
+    setAiHistoryOpen(false);
+    setAiOpen(true);
+  };
+
+  const newSmmAiThread = () => {
+    setAiMessages([]);
+    setAiHistoryOpen(false);
+  };
+
+  const aiThreadMetas = Object.values(aiThreads)
+    .map(th => ({
+      id: th.id,
+      testId: th.cardId,
+      title: th.title,
+      preview: th.messages[th.messages.length - 1]?.content?.slice(0, 80) || '',
+      updatedAt: th.updatedAt,
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 
   const startCreate = () => {
     if (topWindow === 'chats') { setChatCreateOpen(true); setRenamingChatId(null); setChatTitle(''); return; }
@@ -395,6 +502,38 @@ export default function SmmDashboard() {
       if (!target?.id || target.id === myId) return;
       useSmmStore.setState({ profileUserId: target.id, topWindow: 'profile', openChatId: null });
     },
+    onAi: () => {
+      if (it.kind === 'event') openSmmAi('event', it.id, it.title);
+      else if (it.kind === 'post') openSmmAi('post', it.id, it.role?.name || t('smmPost'));
+      else openSmmAi('specialist', it.id, it.name);
+    },
+    aiActive: aiOpen && aiTarget?.id === it.id,
+    onFiles: () => {
+      if (it.kind === 'event') {
+        useSmmStore.setState({
+          filesTarget: {
+            kind: 'event', id: it.id, title: it.title,
+            tests: (it.tests || []).map(tt => ({ id: tt.id, title: tt.title, questions: tt._count?.questions ?? 0 })),
+          },
+          topWindow: 'files', openChatId: null,
+        });
+      } else if (it.kind === 'post') {
+        useSmmStore.setState({
+          filesTarget: {
+            kind: 'post', id: it.id, title: it.role?.name || t('smmPost'),
+            media: ((it.media || []) as { url: string; type: string }[]).slice(0, 30),
+          },
+          topWindow: 'files', openChatId: null,
+        });
+      }
+    },
+    isPublic: it.kind === 'event' ? (it as SmmEventT).isPublic : undefined,
+    onPublic: () => {
+      if (it.kind !== 'event') return;
+      api.updateEvent(it.id, { isPublic: !(it as SmmEventT).isPublic })
+        .then(() => { toast(t('smmEventSaved')); bumpAndReload(); })
+        .catch((e: any) => toast(e?.message || 'Error'));
+    },
     onChat: () => {
       if (it.kind === 'event') { if (it.customerId !== myId) void openDirectChat(it.customerId); }
       else if (it.kind === 'post') { if (it.specialistId !== myId) void openDirectChat(it.specialistId); }
@@ -477,7 +616,8 @@ export default function SmmDashboard() {
   const windowTitle = topWindow === 'bookmarks' ? t('smmTopBookmarks')
     : topWindow === 'chats' ? t('smmTopChats')
     : topWindow === 'requests' ? t('smmRequestsMine')
-    : topWindow === 'profile' ? t('smmViewProfile') : null;
+    : topWindow === 'profile' ? t('smmViewProfile')
+    : topWindow === 'files' ? (filesTarget?.kind === 'event' ? t('smmEventTests') : t('gFiles')) : null;
 
   const renderCard = (it: AnyItem, selected: boolean, variant: 'grid' | 'feed') => {
     const ctx = makeCtx(it, selected);
@@ -488,6 +628,47 @@ export default function SmmDashboard() {
 
   const renderMainWindow = () => {
     if (windowTitle) {
+      // ── the ОКНО ФАЙЛОВ (the event's qualification tests / the post's
+      // media collection — the same window the test files button opens) ──
+      if (topWindow === 'files' && filesTarget) {
+        return (
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
+            <div className="max-w-2xl mx-auto flex flex-col gap-2">
+              <p className="text-sm font-bold text-muted-foreground px-1 truncate">{filesTarget.title}</p>
+              {filesTarget.kind === 'event' && (
+                (filesTarget.tests || []).length === 0
+                  ? <p className="text-sm text-muted-foreground text-center py-10">{t('smmEventTestsNone')}</p>
+                  : (filesTarget.tests || []).map(tt => (
+                    <div key={tt.id} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
+                      <span className="w-10 h-10 rounded-xl bg-[#DFF3E8] flex items-center justify-center shrink-0"><ClipboardList className="w-5 h-5 text-cta" /></span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold truncate">{tt.title}</p>
+                        <p className="text-xs text-muted-foreground">{t('smmTestQuestions', { n: tt.questions ?? 0 })}</p>
+                      </div>
+                    </div>
+                  ))
+              )}
+              {filesTarget.kind === 'post' && (
+                (filesTarget.media || []).length === 0
+                  ? <p className="text-sm text-muted-foreground text-center py-10">{t('smmProfileNothing')}</p>
+                  : (filesTarget.media || []).map((m, i) => (
+                    m.type === 'image' ? (
+                      <button key={i} type="button" onClick={() => setImgPreview(mediaSrc(m.url))} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3 text-left hover:border-black/30 transition-colors">
+                        <span className="w-10 h-10 rounded-xl overflow-hidden shrink-0"><img src={mediaSrc(m.url)} alt="" className="w-full h-full object-cover" /></span>
+                        <span className="min-w-0 flex-1 text-sm font-bold truncate">{t('smmPhoto')}</span>
+                      </button>
+                    ) : (
+                      <div key={i} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
+                        <span className="w-10 h-10 rounded-xl bg-[#FFF0D9] flex items-center justify-center shrink-0"><Film className="w-5 h-5 text-cta" /></span>
+                        <span className="min-w-0 flex-1 text-sm font-bold truncate">{t('smmVideo')}</span>
+                      </div>
+                    )
+                  ))
+              )}
+            </div>
+          </div>
+        );
+      }
       // ── the ОКНО ПРОФИЛЯ (opened by tapping an author on any card) ──
       if (topWindow === 'profile') {
         const spProfile: SmmSpecialistT | null = profileData && profileData.user.roles.length > 0
@@ -730,7 +911,7 @@ export default function SmmDashboard() {
     );
   };
 
-  const plusHidden = topWindow === 'bookmarks' || topWindow === 'profile';
+  const plusHidden = topWindow === 'bookmarks' || topWindow === 'profile' || topWindow === 'files';
   const tw = topWindow as string; // widened read for the JSX comparisons
 
   return (
@@ -871,6 +1052,28 @@ export default function SmmDashboard() {
           </Button>
         </div>
       )}
+      {/* «Обсудить с ИИ» — the SAME panel the test cards open */}
+      <AiChatPanel
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        subtitle={aiTarget?.title}
+        messages={aiMessages}
+        loading={aiLoading}
+        input={aiInput}
+        onInputChange={setAiInput}
+        onSend={() => sendSmmAi()}
+        endRef={aiEndRef}
+        inputPlaceholder={t('aiTestChatPlaceholder')}
+        historyOpen={aiHistoryOpen}
+        onToggleHistory={() => setAiHistoryOpen(v => !v)}
+        threads={aiThreadMetas}
+        activeThreadId={aiTarget ? `${aiTarget.kind}:${aiTarget.id}` : undefined}
+        onSelectThread={selectSmmAiThread}
+        historyLabel={t('chatHistory')}
+        noChatsLabel={t('noChatsYet')}
+        onNewChat={newSmmAiThread}
+        newChatLabel={t('newChat')}
+      />
       <SmmToast />
     </div>
   );

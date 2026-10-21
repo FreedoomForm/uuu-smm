@@ -11,8 +11,21 @@ import { makeStore } from '@/stores/make-store';
 
 export type SmmMode = 'specialist' | 'customer';
 // The main-window mode the top-panel buttons switch to ('profile' = the
-// author window opened by tapping the author strip on any card)
-export type SmmTopWindow = 'none' | 'bookmarks' | 'chats' | 'requests' | 'profile';
+// author window opened by tapping the author strip on any card; 'files' =
+// the attached files of ONE card — the event's qualification tests / the
+// post's media collection, the same contract the tests files window keeps)
+export type SmmTopWindow = 'none' | 'bookmarks' | 'chats' | 'requests' | 'profile' | 'files';
+
+// The card whose files window is open (topWindow === 'files'): the event's
+// qualification tests OR the post's media collection (carried at open time —
+// no refetch needed, the card already holds them)
+export interface SmmFilesTarget {
+  kind: 'event' | 'post';
+  id: string;
+  title: string;
+  tests?: { id: string; title: string; questions?: number }[];
+  media?: { url: string; type: string }[];
+}
 
 // The event whose qualification tests the specialist is taking (заявка flow)
 export interface SmmApplyCtx {
@@ -63,6 +76,8 @@ interface SmmData {
   editingId: string | null;
   // The author whose profile window is open (topWindow === 'profile')
   profileUserId: string | null;
+  // The card whose files window is open (topWindow === 'files')
+  filesTarget: SmmFilesTarget | null;
 }
 
 const INITIAL: SmmData = {
@@ -79,6 +94,7 @@ const INITIAL: SmmData = {
   openChatId: null,
   editingId: null,
   profileUserId: null,
+  filesTarget: null,
   applyResults: {},
 };
 

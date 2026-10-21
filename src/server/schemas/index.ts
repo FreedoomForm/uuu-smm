@@ -237,6 +237,23 @@ export const aiTestChatSchema = z.object({
     .max(60),
 });
 
+// AI chat about an SMM CARD (the «Обсудить с ИИ» button on the мероприятие /
+// пост / специалист cards): the server builds the card's passport into the
+// system prompt, no concrete question — the AI holds the full card context.
+export const smmAiChatSchema = z.object({
+  kind: z.enum(["event", "post", "specialist"]),
+  id: z.string().min(1).max(64),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().max(8000),
+      })
+    )
+    .min(1)
+    .max(60),
+});
+
 // -------------------------------------------------------------- translate ---
 export const translateSchema = z.object({
   texts: z.array(z.string().max(6000)).min(1).max(500),
