@@ -211,8 +211,16 @@ export default function SmmDashboard() {
   const loadRequests = useCallback(async () => {
     if (!myId) return;
     try {
-      const r = isSpecialist ? await api.getApplications() : await api.getInvitations();
-      setRequests(r.items || []);
+      // BOTH kinds for BOTH roles: the specialist's window holds their sent
+      // заявки AND the приглашения that arrived for them; the customer's —
+      // their sent приглашения AND the заявки that arrived for their events.
+      const [apps, invs] = await Promise.all([
+        api.getApplications().catch(() => ({ items: [] })),
+        api.getInvitations().catch(() => ({ items: [] })),
+      ]);
+      const merged = [...(apps.items || []), ...(invs.items || [])]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setRequests(merged as SmmRequestRowT[]);
     } catch { setRequests([]); }
   }, [myId, isSpecialist]);
 
