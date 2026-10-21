@@ -568,25 +568,36 @@ export async function createApplication(
 }
 
 export async function listMyApplications(userId: string) {
+  // BOTH DIRECTIONS: the specialist sees the заявки they sent, the customer
+  // sees the заявки that arrived for THEIR events (the same window serves
+  // both roles — an application is visible to both its parties at once).
   const rows = await db.smmApplication.findMany({
-    where: { specialistId: userId },
+    where: { OR: [{ specialistId: userId }, { event: { customerId: userId } }] },
     orderBy: { createdAt: "desc" },
     take: 100,
-    include: { event: { select: { id: true, title: true } }, role: { select: { id: true, name: true } } },
+    include: {
+      event: { select: { id: true, title: true, customerId: true, customer: { select: { name: true } } } },
+      role: { select: { id: true, name: true } },
+      specialist: { select: { name: true } },
+    },
   });
-  const items = rows.map((a) => ({
-    id: a.id,
-    kind: "application" as const,
-    status: a.status,
-    createdAt: a.createdAt,
-    score: a.score,
-    totalQuestions: a.totalQuestions,
-    eventId: a.event.id,
-    eventTitle: a.event.title,
-    roleId: a.role.id,
-    roleName: a.role.name,
-    counterpartyName: "",
-  }));
+  const items = rows.map((a) => {
+    const sent = a.specialistId === userId;
+    return {
+      id: a.id,
+      kind: "application" as const,
+      status: a.status,
+      createdAt: a.createdAt,
+      score: a.score,
+      totalQuestions: a.totalQuestions,
+      eventId: a.event.id,
+      eventTitle: a.event.title,
+      roleId: a.role.id,
+      roleName: a.role.name,
+      counterpartyName: sent ? (a.event.customer?.name || "") : (a.specialist?.name || ""),
+      direction: sent ? ("sent" as const) : ("incoming" as const),
+    };
+  });
   return { items };
 }
 
@@ -637,28 +648,35 @@ export async function createInvitation(
 }
 
 export async function listMyInvitations(userId: string) {
+  // BOTH DIRECTIONS: the customer sees the приглашения they sent, the
+  // specialist sees the ones that arrived for THEM (one window for both).
   const rows = await db.smmInvitation.findMany({
-    where: { customerId: userId },
+    where: { OR: [{ customerId: userId }, { specialistId: userId }] },
     orderBy: { createdAt: "desc" },
     take: 100,
     include: {
       event: { select: { id: true, title: true } },
       role: { select: { id: true, name: true } },
       specialist: { select: { name: true } },
+      customer: { select: { name: true } },
     },
   });
-  const items = rows.map((i) => ({
-    id: i.id,
-    kind: "invitation" as const,
-    status: i.status,
-    createdAt: i.createdAt,
-    estimate: i.estimate,
-    eventId: i.event.id,
-    eventTitle: i.event.title,
-    roleId: i.role.id,
-    roleName: i.role.name,
-    counterpartyName: i.specialist?.name || "",
-  }));
+  const items = rows.map((i) => {
+    const sent = i.customerId === userId;
+    return {
+      id: i.id,
+      kind: "invitation" as const,
+      status: i.status,
+      createdAt: i.createdAt,
+      estimate: i.estimate,
+      eventId: i.event.id,
+      eventTitle: i.event.title,
+      roleId: i.role.id,
+      roleName: i.role.name,
+      counterpartyName: sent ? (i.specialist?.name || "") : (i.customer?.name || ""),
+      direction: sent ? ("sent" as const) : ("incoming" as const),
+    };
+  });
   return { items };
 }
 

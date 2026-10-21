@@ -154,6 +154,11 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
   const bgStyle = event.coverColor ? { backgroundColor: event.coverColor } : undefined;
   const bgClass = event.coverColor ? '' : 'bg-[#E3EEFF]';
   const showRolePicker = !own && ctx.myRoles.length > 0;
+  // The role-less specialist sees WHY there is no picker: their own role is
+  // born in the post editor — the «Подать заявку» bar button leads there.
+  const noRoleHint = !own && ctx.myRoles.length === 0 && (
+    <p className="shrink-0 text-[11px] font-semibold text-muted-foreground">{ctx.t('smmApplyNeedRole')}</p>
+  );
   const rolePicker = showRolePicker && (
     <div className="shrink-0" onClick={e => e.stopPropagation()}>
       <p className="text-[11px] font-semibold text-muted-foreground mb-1">{t('smmApplyPickRole')}</p>
@@ -222,6 +227,7 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
             <div className="shrink-0"><EventFacts event={event} t={t} feed /></div>
             {event.summary && <p className="mt-1.5 text-[11px] sm:text-xs text-muted-foreground line-clamp-2">{event.summary}</p>}
             {rolePicker}
+            {noRoleHint}
           </div>
           {ladder}
         </div>
@@ -245,6 +251,7 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
       </div>
       {event.summary && <p className="mt-2 text-xs sm:text-sm text-muted-foreground line-clamp-2">{event.summary}</p>}
       {rolePicker}
+      {noRoleHint}
       {ladder}
     </div>
   );

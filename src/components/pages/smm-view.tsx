@@ -520,7 +520,17 @@ export default function SmmDashboard() {
   };
 
   const applyFromCard = () => {
-    if (!activeEvent || !pickedApplyRole) return;
+    if (!activeEvent) return;
+    // The button ALWAYS works: a specialist without any role yet is led to
+    // the post editor — the role (+ prices) is born there, then the заявка
+    // can be sent. Never a dead disabled button.
+    if (myRoles.length === 0) {
+      toast(t('smmApplyNeedRole'));
+      useSmmStore.setState({ editingId: null });
+      setPage('smm-post-editor');
+      return;
+    }
+    if (!pickedApplyRole) return;
     useSmmStore.setState({
       applyCtx: { eventId: activeEvent.id, roleId: pickedApplyRole, testIds: activeEvent.testIds || [] },
       inviteCtx: null,
@@ -781,6 +791,9 @@ export default function SmmDashboard() {
       }
       if (it.kind === 'specialist') {
         if (!smmNow().pickedInviteRole) useSmmStore.setState({ pickedInviteRole: it.roles[0]?.id || null });
+        // The invite bar must never open dead: default the event to the first
+        // own one (the invite screen shows the choice before confirming).
+        if (!smmNow().pickedInviteEvent) useSmmStore.setState({ pickedInviteEvent: myEvents[0]?.id || null });
       }
     },
     myRoles,
@@ -845,7 +858,10 @@ export default function SmmDashboard() {
       return null;
     }
     if (isSpecialist && activeItem.kind === 'event' && activeEvent && activeEvent.customerId !== myId) {
-      return { label: t('smmApplyBtn'), fn: applyFromCard, disabled: !pickedApplyRole };
+      // Disabled only in the transient state «roles exist but none picked»
+      // (the picker defaults the first role instantly, so it never sticks);
+      // role-less specialists get a WORKING button that opens the post editor.
+      return { label: t('smmApplyBtn'), fn: applyFromCard, disabled: myRoles.length > 0 && !pickedApplyRole };
     }
     if (!isSpecialist && activeItem.kind === 'specialist') {
       return { label: t('smmInviteBtn'), fn: inviteFromCard, disabled: !pickedInviteEvent || !pickedInviteRole };
@@ -1048,10 +1064,11 @@ export default function SmmDashboard() {
           <div className="max-w-2xl mx-auto flex flex-col gap-2">
             {requests.length === 0 && <p className="text-sm text-muted-foreground text-center py-10">{t('smmRequestsEmpty')}</p>}
             {requests.map(r => (
-              <RequestRow key={r.id} kindLabel={r.kind === 'application' ? t('smmApplication') : t('smmInvitation')}
-                title={r.eventTitle} sub={r.kind === 'application' ? `${t('smmPostRole')}: ${r.roleName}` : `${r.counterpartyName} · ${r.roleName}`}
+              <RequestRow key={r.id} kindLabel={`${r.kind === 'application' ? t('smmApplication') : t('smmInvitation')} · ${r.direction === 'incoming' ? t('smmReqIn') : t('smmReqOut')}`}
+                title={r.eventTitle}
+                sub={`${r.counterpartyName ? `${r.counterpartyName} · ` : ''}${r.roleName}`}
                 status={r.status} score={r.kind === 'application' ? `${r.score}/${r.totalQuestions}` : (r.estimate != null ? `${t('smmEstimate')}: ${fmtMoney(r.estimate)}` : undefined)}
-                onWithdraw={() => withdraw(r)} withdrawLabel={t('smmRequestWithdraw')} t={t} />
+                onWithdraw={r.direction === 'incoming' ? undefined : () => withdraw(r)} withdrawLabel={t('smmRequestWithdraw')} t={t} />
             ))}
           </div>
         </div>
@@ -1195,9 +1212,12 @@ export default function SmmDashboard() {
       {/* ── MAIN ── */}
       {renderMainWindow()}
 
-      {/* ── BAR 1: the context action (Подать заявку / Пригласить / Изменить) ── */}
+      {/* ── BAR 1: the context action (Подать заявку / Пригласить / Изменить).
+      desktop-dock-top: the SMM dashboard stacks THREE docks (mode panel at
+      the very bottom, the library dock above it, this bar above that) —
+      without the raise the library dock hides UNDER the mode panel. */}
       {barAction && (
-        <div className="desktop-dock desktop-dock-raised shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
+        <div className="desktop-dock desktop-dock-raised desktop-dock-top shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
           <div className="max-w-2xl mx-auto px-4 pt-3 pb-3">
             <Button onClick={barAction.fn} disabled={'disabled' in barAction && barAction.disabled} className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-cta hover:bg-cta/90 text-white">
               {barAction.label}
@@ -1206,8 +1226,9 @@ export default function SmmDashboard() {
         </div>
       )}
 
-      {/* ── DOCK: личная библиотека | публичная библиотека ── */}
-      <div className="desktop-dock shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
+      {/* ── DOCK: личная библиотека | публичная библиотека — desktop-dock-mid
+      lifts it ABOVE the mode panel (same fixed slot otherwise → overlap) */}
+      <div className="desktop-dock desktop-dock-mid shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
         <div className="max-w-2xl mx-auto px-3 sm:px-4 pt-2">
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={() => gotoLibrary(false)} disabled={listLoading}

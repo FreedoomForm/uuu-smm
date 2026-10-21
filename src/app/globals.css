@@ -365,4 +365,15 @@
   .desktop-dock-raised {
     bottom: 5.25rem;
   }
+  /* The SMM dashboard stacks THREE fixed docks at one slot: the mode panel
+     (СММ специалист | Заказчик) sits at the very bottom, the library dock
+     (личная | публичная) above it, and the context bar (Подать заявку /
+     Пригласить) above that — without the lifts the later DOM dock paints
+     OVER the earlier one and the covered dock's clicks never land. */
+  .desktop-dock-mid {
+    bottom: 5.25rem;
+  }
+  .desktop-dock-top {
+    bottom: 9.25rem;
+  }
 }

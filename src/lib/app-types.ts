@@ -257,6 +257,8 @@ export interface SmmRequestRowT {
   roleId: string;
   roleName: string;
   counterpartyName: string;
+  // 'sent' = my own request (withdrawable), 'incoming' = arrived for me
+  direction?: 'sent' | 'incoming';
 }
 
 // A row of the закладки window
