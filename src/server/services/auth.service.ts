@@ -22,6 +22,8 @@ export type PublicUser = {
   // The account kind picked at registration («СММ специалист» | «Заказчик»).
   // FIXED: the SMM view locks to it — no bottom-panel role switcher.
   smmRole: string;
+  // СОС / админ-панель access (granted by the platform owner in the DB).
+  isAdmin: boolean;
 };
 
 function normalizeSmmRole(v: unknown): string {
@@ -66,7 +68,7 @@ export async function registerUser(input: {
     throw e;
   }
 
-  return { id: user.id, email: user.email, name: user.name, smmRole: user.smmRole };
+  return { id: user.id, email: user.email, name: user.name, smmRole: user.smmRole, isAdmin: user.isAdmin };
 }
 
 export async function loginUser(input: {
@@ -86,6 +88,12 @@ export async function loginUser(input: {
     throw ApiError.unauthorized("Invalid email or password");
   }
 
+  // Blocked by an admin → no new sessions, ever (the existing sessions are
+  // killed by every authed call returning 403).
+  if (user.isBlocked) {
+    throw ApiError.forbidden("Account blocked");
+  }
+
   // Legacy sha256 account just authenticated — silently migrate it to bcrypt
   if (result.upgradeTo) {
     await db.user
@@ -95,5 +103,5 @@ export async function loginUser(input: {
       });
   }
 
-  return { id: user.id, email: user.email, name: user.name, smmRole: user.smmRole };
+  return { id: user.id, email: user.email, name: user.name, smmRole: user.smmRole, isAdmin: user.isAdmin };
 }

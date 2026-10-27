@@ -284,6 +284,42 @@ export const api = {
     apiFetch('/smm/applications', { method: 'POST', body: JSON.stringify(data) }),
   deleteApplication: (id: string) => apiFetch(`/smm/applications/${id}`, { method: 'DELETE' }),
 
+  // REAL-TIME CHAT — the long-poll: the request is held on the server until
+  // new messages exist (≤25s), the client re-opens it after every answer.
+  pollChatMessages: (id: string, after?: string) =>
+    apiFetch(`/smm/chats/${id}/poll?wait=25000${after ? `&after=${encodeURIComponent(after)}` : ''}`) as Promise<{ messages: import('@/lib/app-types').SmmChatMessageT[] }>,
+
+  // ЧЕК-ЛИСТ file upload — the SAME attachment pipeline the tests keep
+  // (FormData must not carry the JSON Content-Type → raw fetch)
+  uploadFile: async (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/attachments/upload', { method: 'POST', body: fd, credentials: 'include' });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error((e as any).error || 'Upload failed');
+    }
+    return res.json() as Promise<{ ok: boolean; url: string; name: string; size: number }>;
+  },
+
+  // ЧЕК-ЛИСТ СДАЧИ — the event's delivery slots on an accepted deal
+  getChecklist: (dealType: 'application' | 'invitation', dealId: string) =>
+    apiFetch(`/smm/checklist?dealType=${dealType}&dealId=${encodeURIComponent(dealId)}`) as Promise<{ eventTitle: string; items: import('@/lib/app-types').SmmChecklistItemT[]; approved: number; total: number; allApproved: boolean }>,
+  submitChecklistItem: (dealType: 'application' | 'invitation', dealId: string, idx: number, value: string, valueKind: 'link' | 'file', note?: string) =>
+    apiFetch('/smm/checklist', { method: 'POST', body: JSON.stringify({ dealType, dealId, idx, value, valueKind, note }) }) as Promise<{ ok: boolean }>,
+  decideChecklistItem: (dealType: 'application' | 'invitation', dealId: string, idx: number, decision: 'approved' | 'declined') =>
+    apiFetch('/smm/checklist', { method: 'PATCH', body: JSON.stringify({ dealType, dealId, idx, decision }) }) as Promise<{ ok: boolean; allApproved: boolean }>,
+
+  // СОС — the platform-support signal + the админ-панель data
+  createSos: (data: { dealType?: string; dealId?: string; reason?: string }) =>
+    apiFetch('/smm/sos', { method: 'POST', body: JSON.stringify(data) }) as Promise<{ id: string }>,
+  getAdminData: () =>
+    apiFetch('/smm/admin/data') as Promise<import('@/lib/app-types').SmmAdminDataT>,
+  adminTicketAction: (id: string, action: 'accept' | 'close') =>
+    apiFetch(`/smm/sos/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }) as Promise<{ id: string; status: string }>,
+  adminSetBlocked: (id: string, blocked: boolean) =>
+    apiFetch(`/smm/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ blocked }) }) as Promise<{ id: string; isBlocked: boolean }>,
+
   // Приглашения (the customer invites a specialist to an event with a role)
   getInvitations: () =>
     apiFetch('/smm/invitations') as Promise<{ items: import('@/lib/app-types').SmmRequestRowT[] }>,

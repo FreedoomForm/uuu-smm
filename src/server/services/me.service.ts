@@ -22,6 +22,8 @@ export async function getProfile(userId: string) {
     select: {
       id: true, email: true, name: true, bgStyle: true, lang: true, image: true, smmRole: true, smmRating: true,
       smmPremium: true, smmCompanyName: true, smmCompanyType: true, smmCompanyCity: true,
+      // СОС / админ-панель: the client shows the «Админ» entry only for admins
+      isAdmin: true,
     },
   });
   if (!user) throw ApiError.notFound("User not found");

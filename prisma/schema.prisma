@@ -60,6 +60,11 @@ model User {
   // Premium profile badge (monetization: premium-профили). MVP: the flag is
   // flipped by the profile page; billing comes later.
   smmPremium   Boolean @default(false)
+  // ── PLATFORM ADMIN (СОС / админ-панель): can open any deal chat via a
+  // СОС ticket, force-close deals and block users. Granted by the seed SQL.
+  isAdmin      Boolean @default(false)
+  // Blocked by an admin: login rejected + every authed API returns 403.
+  isBlocked    Boolean @default(false)
   // COMPANY PROFILE (the customer side of the tourism marketplace): the
   // tourism business's public card — name + type (hotel/guesthouse/guide/
   // tour-agency) + city. Shown in the companies catalog and on their orders.
@@ -91,6 +96,9 @@ model User {
   // Отзывы (Mercur/Sharetribe deal reviews): written by me / received about me
   smmReviewsWritten      SmmReview[]     @relation("SmmReviewAuthor")
   smmReviewsReceived     SmmReview[]     @relation("SmmReviewTarget")
+  // СОС-тикеты: created by me / accepted by me (admin side)
+  smmTicketsOpened       SmmSupportTicket[] @relation("SmmTicketAuthor")
+  smmTicketsHandled      SmmSupportTicket[] @relation("SmmTicketAdmin")
 }
 
 // Opaque session token → user. The phone stores ONLY the token cookie
@@ -198,6 +206,12 @@ model SmmEvent {
   // Qualification tests the customer attached (their OWN tests, ordered):
   // the specialist passes them on the «подать заявку» screen.
   testIds      String[] @default([])
+  // ── ЧЕК-ЛИСТ СДАЧИ (the delivery checklist): the customer defines N file
+  // slots at event creation; for EACH slot they describe WHAT the file/link
+  // must be (e.g. «скрин отчёта о охватах»). The specialist fills every slot
+  // on the accepted deal (link or uploaded file) — the customer approves or
+  // declines each item. JSON: [{ label: string, desc: string }].
+  checklist    Json?
   // The «Прикреплённые файлы» section of the event editor — the SAME
   // attachment shape the test editor keeps (title/type/url/size/tgMessageId):
   // audio, video, pdf, image, embed, link. Shown in the card's files window.
@@ -348,6 +362,11 @@ model SmmInvitation {
   // offline, pricePerK × expected blocks for online — computed at send time.
   estimate     Float?
   status       String   @default("pending") // pending | accepted | declined | completed
+  // ЧЕК-ЛИСТ СДАЧИ (the deal's filled delivery state — the definition lives
+  // on the event). JSON entries [{ idx, label, desc, value, valueKind,
+  // status, note, updatedAt }]: valueKind "link" | "file"; status "pending"
+  // | "submitted" | "approved" | "declined" (declined → resubmit allowed).
+  checklist    Json?
   // Deal completion (Mercur order lifecycle): the deal becomes «completed»
   // only when BOTH sides confirm — that unlocks the reviews for this deal.
   completedByCustomer   Boolean   @default(false)
@@ -411,6 +430,8 @@ model SmmApplication {
   score         Int     @default(0)
   totalQuestions Int    @default(0)
   status       String   @default("pending") // pending | accepted | declined | completed
+  // ЧЕК-ЛИСТ СДАЧИ — the deal's filled delivery state (mirrors SmmInvitation).
+  checklist    Json?
   // Deal completion (both-side confirmation) — mirrors SmmApplication.
   completedByCustomer   Boolean   @default(false)
   completedBySpecialist Boolean   @default(false)
@@ -450,6 +471,35 @@ model SmmReview {
 
   @@unique([dealType, dealId, authorId])
   @@index([targetId])
+}
+
+// СОС-ТИКЕТ — the platform-support signal: any deal party presses «СОС» and
+// the request lands in the ADMINS' panel AND as a card in the общая
+// библиотека (admins only). An admin accepts it → enters the deal's direct
+// chat (talks to both sides), then closes the deal either way or blocks a
+// user. status: open → accepted (admin inside) → closed.
+model SmmSupportTicket {
+  id          String   @id @default(cuid())
+  createdById String
+  createdBy   User     @relation("SmmTicketAuthor", fields: [createdById], references: [id], onDelete: Cascade)
+  // The direct chat the admin joins (customer ↔ specialist of the deal)
+  chatId      String
+  // The deal the СОС is about (polymorphic, the same pair SmmReview keeps)
+  dealType    String   @default("") // "application" | "invitation" | ""
+  dealId      String   @default("")
+  // Snapshot for the ticket card (the chat row + admin list)
+  eventTitle  String   @default("")
+  peerNames   String   @default("") // «Заказчик ⇄ Специалист»
+  reason      String   @default("")
+  status      String   @default("open") // open | accepted | closed
+  adminId     String?
+  admin       User?    @relation("SmmTicketAdmin", fields: [adminId], references: [id], onDelete: SetNull)
+  closedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdById])
 }
 
 // ФОТО-СПОТ — one pin on the public photo-spots map (столп 3: красивые

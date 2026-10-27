@@ -336,6 +336,17 @@ function eventPayload(userId: string, body: Record<string, unknown>, forCreate: 
   }
   // the editor's «Прикреплённые файлы» section (the test editor's shape)
   if (body.attachments !== undefined) data.attachments = asAttachments(body.attachments);
+  // ЧЕК-ЛИСТ СДАЧИ — the delivery slots the specialist must fill on the
+  // accepted deal: [{ label, desc }] (sanitized, max 20 slots)
+  if (body.checklist !== undefined) {
+    data.checklist = Array.isArray(body.checklist)
+      ? (body.checklist as unknown[])
+          .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+          .map((x) => ({ label: String(x.label || "").slice(0, 200), desc: String(x.desc || "").slice(0, 500) }))
+          .filter((x) => x.label || x.desc)
+          .slice(0, 20)
+      : null;
+  }
   if (body.coverColor !== undefined) data.coverColor = typeof body.coverColor === "string" ? body.coverColor.slice(0, 32) : null;
   if (body.coverIcon !== undefined) data.coverIcon = typeof body.coverIcon === "string" ? body.coverIcon.slice(0, 16) : null;
   if (typeof body.isPublic === "boolean") data.isPublic = body.isPublic;
@@ -742,6 +753,7 @@ export async function listMyApplications(userId: string) {
       roleId: a.role.id,
       roleName: a.role.name,
       counterpartyName: sent ? (a.event.customer?.name || "") : (a.specialist?.name || ""),
+      counterpartyId: sent ? a.event.customerId : a.specialistId,
       direction: sent ? ("sent" as const) : ("incoming" as const),
     };
   });
@@ -826,6 +838,7 @@ export async function listMyInvitations(userId: string) {
       roleId: i.role.id,
       roleName: i.role.name,
       counterpartyName: sent ? (i.specialist?.name || "") : (i.customer?.name || ""),
+      counterpartyId: sent ? i.specialistId : i.customerId,
       direction: sent ? ("sent" as const) : ("incoming" as const),
     };
   });
@@ -853,16 +866,19 @@ export async function decideApplication(userId: string, id: string, decision: st
     include: { event: { select: { id: true, title: true, customerId: true } }, role: { select: { name: true } } },
   });
   if (!app) throw ApiError.notFound("Application not found");
-  if (app.event.customerId !== userId) throw ApiError.forbidden("Only the customer can decide");
+  // The customer decides — OR the platform ADMIN (the СОС flow: the admin
+  // closes the deal either way from the админ-панель).
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true, isAdmin: true } });
+  const adminOverride = !!me?.isAdmin && app.event.customerId !== userId;
+  if (app.event.customerId !== userId && !adminOverride) throw ApiError.forbidden("Only the customer can decide");
   if (app.status !== "pending") throw ApiError.conflict("Already decided");
   const updated = await db.smmApplication.update({ where: { id }, data: { status: decision } });
-  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
   const chat = await directChatBetween(app.specialistId, app.event.customerId);
   await postSystemMessage(
     chat.id,
     userId,
     me?.name || "",
-    `ЗАЯВКА ${decision === "accepted" ? "ПРИНЯТА — сделка началась" : "ОТКЛОНЕНА"} · «${app.event.title}» · роль «${app.role.name}»`
+    `${adminOverride ? "АДМИН · " : ""}ЗАЯВКА ${decision === "accepted" ? "ПРИНЯТА — сделка началась" : "ОТКЛОНЕНА"} · «${app.event.title}» · роль «${app.role.name}»`
   );
   await telegramNotify(
     decision === "accepted"
@@ -880,16 +896,18 @@ export async function decideInvitation(userId: string, id: string, decision: str
     include: { event: { select: { id: true, title: true } }, role: { select: { name: true } } },
   });
   if (!inv) throw ApiError.notFound("Invitation not found");
-  if (inv.specialistId !== userId) throw ApiError.forbidden("Only the invited specialist can decide");
+  // The invited specialist decides — OR the platform ADMIN (СОС bypass).
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true, isAdmin: true } });
+  const adminOverride = !!me?.isAdmin && inv.specialistId !== userId;
+  if (inv.specialistId !== userId && !adminOverride) throw ApiError.forbidden("Only the invited specialist can decide");
   if (inv.status !== "pending") throw ApiError.conflict("Already decided");
   const updated = await db.smmInvitation.update({ where: { id }, data: { status: decision } });
-  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
   const chat = await directChatBetween(inv.customerId, inv.specialistId);
   await postSystemMessage(
     chat.id,
     userId,
     me?.name || "",
-    `ПРИГЛАШЕНИЕ ${decision === "accepted" ? "ПРИНЯТО — сделка началась" : "ОТКЛОНЕНО"} · «${inv.event.title}» · роль «${inv.role.name}»`
+    `${adminOverride ? "АДМИН · " : ""}ПРИГЛАШЕНИЕ ${decision === "accepted" ? "ПРИНЯТО — сделка началась" : "ОТКЛОНЕНО"} · «${inv.event.title}» · роль «${inv.role.name}»`
   );
   await telegramNotify(
     decision === "accepted"
@@ -1361,4 +1379,321 @@ export async function deleteSpecialistCard(userId: string, id: string) {
   await db.smmRole.deleteMany({ where: { ownerId: userId } });
   await db.user.updateMany({ where: { id: userId, smmRole: "specialist" }, data: { smmRole: "customer" } });
   return { ok: true };
+}
+
+// ── ЧЕК-ЛИСТ СДАЧИ (the delivery checklist) ─────────────────────────────────
+// The customer defines N file slots at event creation (SmmEvent.checklist =
+// [{ label, desc }]). On the ACCEPTED deal the specialist fills every slot —
+// a link OR an uploaded file — and the customer approves/declines each item.
+// The filled state lives on the deal (SmmApplication.checklist /
+// SmmInvitation.checklist): [{ idx, label, desc, value, valueKind, status,
+// note, updatedAt }]. When ALL items are approved the deal can complete.
+
+type ChecklistDefItem = { label?: unknown; desc?: unknown };
+type ChecklistEntry = {
+  idx: number; label: string; desc: string;
+  value: string; valueKind: "link" | "file";
+  status: "pending" | "submitted" | "approved" | "declined";
+  note: string; updatedAt: string;
+};
+
+function eventChecklistDef(ev: { checklist?: unknown }): { label: string; desc: string }[] {
+  if (!Array.isArray(ev.checklist)) return [];
+  return ev.checklist
+    .filter((x): x is ChecklistDefItem => !!x && typeof x === "object")
+    .map((x) => ({ label: String(x.label || "").slice(0, 200), desc: String(x.desc || "").slice(0, 500) }))
+    .filter((x) => x.label || x.desc);
+}
+
+function dealChecklistEntries(raw: unknown): ChecklistEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+    .map((x) => ({
+      idx: Math.max(0, Math.min(999, Number(x.idx) || 0)),
+      label: String(x.label || "").slice(0, 200),
+      desc: String(x.desc || "").slice(0, 500),
+      value: String(x.value || "").slice(0, 3000),
+      valueKind: (x.valueKind === "file" ? "file" : "link") as "link" | "file",
+      status: (["pending", "submitted", "approved", "declined"].includes(String(x.status)) ? x.status : "pending") as ChecklistEntry["status"],
+      note: String(x.note || "").slice(0, 1000),
+      updatedAt: typeof x.updatedAt === "string" ? x.updatedAt : "",
+    }));
+}
+
+async function dealForChecklist(userId: string, dealType: string, dealId: string) {
+  if (dealType === "application") {
+    const app = await db.smmApplication.findUnique({
+      where: { id: dealId },
+      include: { event: { select: { id: true, title: true, customerId: true, checklist: true } } },
+    });
+    if (!app) throw ApiError.notFound("Deal not found");
+    const me = await db.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
+    if (app.specialistId !== userId && app.event.customerId !== userId && !me?.isAdmin) {
+      throw ApiError.forbidden("Not your deal");
+    }
+    return { deal: app, event: app.event, specialistId: app.specialistId, customerId: app.event.customerId, entries: dealChecklistEntries(app.checklist) };
+  }
+  if (dealType === "invitation") {
+    const inv = await db.smmInvitation.findUnique({
+      where: { id: dealId },
+      include: { event: { select: { id: true, title: true, customerId: true, checklist: true } } },
+    });
+    if (!inv) throw ApiError.notFound("Deal not found");
+    const me = await db.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
+    if (inv.specialistId !== userId && inv.customerId !== userId && !me?.isAdmin) {
+      throw ApiError.forbidden("Not your deal");
+    }
+    return { deal: inv, event: inv.event, specialistId: inv.specialistId, customerId: inv.customerId, entries: dealChecklistEntries(inv.checklist) };
+  }
+  throw ApiError.badRequest("dealType must be application or invitation");
+}
+
+/** The checklist view: the event's definition merged with the deal's state. */
+export async function getChecklist(userId: string, dealType: string, dealId: string) {
+  const { event, entries } = await dealForChecklist(userId, dealType, dealId);
+  const def = eventChecklistDef(event);
+  const items = def.map((d, idx) => {
+    const e = entries.find((x) => x.idx === idx);
+    return {
+      idx,
+      label: d.label,
+      desc: d.desc,
+      value: e?.value || "",
+      valueKind: e?.valueKind || ("link" as const),
+      status: e?.status || "pending",
+      note: e?.note || "",
+      updatedAt: e?.updatedAt || "",
+    };
+  });
+  const approved = items.filter((x) => x.status === "approved").length;
+  return {
+    eventTitle: event.title,
+    items,
+    approved,
+    total: items.length,
+    allApproved: items.length > 0 && approved === items.length,
+  };
+}
+
+/** The SPECIALIST submits one checklist slot (a link or an uploaded file). */
+export async function submitChecklistItem(
+  userId: string,
+  dealType: string,
+  dealId: string,
+  idx: number,
+  body: { value: string; valueKind?: string; note?: string }
+) {
+  const { deal, event, specialistId, customerId, entries } = await dealForChecklist(userId, dealType, dealId);
+  if (specialistId !== userId) throw ApiError.forbidden("Only the deal's specialist submits the checklist");
+  if (deal.status !== "accepted") throw ApiError.conflict("The deal is not active");
+  const def = eventChecklistDef(event);
+  if (idx < 0 || idx >= def.length) throw ApiError.badRequest("No such checklist slot");
+  const value = String(body.value || "").trim().slice(0, 3000);
+  const valueKind = body.valueKind === "file" ? "file" : "link";
+  if (!value) throw ApiError.badRequest("The slot needs a link or a file");
+  if (valueKind === "link" && !/^https?:\/\/\S+/i.test(value)) {
+    throw ApiError.badRequest("The link must start with http(s)://");
+  }
+  const prev = entries.find((x) => x.idx === idx);
+  if (prev?.status === "approved") throw ApiError.conflict("This slot is already approved");
+  const next = entries.filter((x) => x.idx !== idx);
+  next.push({
+    idx, label: def[idx].label, desc: def[idx].desc,
+    value, valueKind,
+    status: "submitted",
+    note: String(body.note || "").slice(0, 1000),
+    updatedAt: new Date().toISOString(),
+  });
+  if (dealType === "application") {
+    await db.smmApplication.update({ where: { id: deal.id }, data: { checklist: next } });
+  } else {
+    await db.smmInvitation.update({ where: { id: deal.id }, data: { checklist: next } });
+  }
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const chat = await directChatBetween(specialistId, customerId);
+  await postSystemMessage(chat.id, userId, me?.name || "", `ЧЕК-ЛИСТ · «${def[idx].label || "слот " + (idx + 1)}» сдан · ${value}`);
+  return { ok: true };
+}
+
+/** The CUSTOMER approves or declines one submitted checklist slot. */
+export async function decideChecklistItem(
+  userId: string,
+  dealType: string,
+  dealId: string,
+  idx: number,
+  decision: string
+) {
+  if (decision !== "approved" && decision !== "declined") throw ApiError.badRequest("decision must be approved or declined");
+  const { deal, event, specialistId, customerId, entries } = await dealForChecklist(userId, dealType, dealId);
+  if (customerId !== userId) throw ApiError.forbidden("Only the deal's customer decides the checklist");
+  const def = eventChecklistDef(event);
+  if (idx < 0 || idx >= def.length) throw ApiError.badRequest("No such checklist slot");
+  const prev = entries.find((x) => x.idx === idx);
+  if (!prev || prev.status !== "submitted") throw ApiError.conflict("Nothing submitted for this slot");
+  const next = entries.map((x) => (x.idx === idx ? { ...x, status: decision as ChecklistEntry["status"], updatedAt: new Date().toISOString() } : x));
+  if (dealType === "application") {
+    await db.smmApplication.update({ where: { id: deal.id }, data: { checklist: next } });
+  } else {
+    await db.smmInvitation.update({ where: { id: deal.id }, data: { checklist: next } });
+  }
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const allApproved = def.every((_, i) => next.find((x) => x.idx === i)?.status === "approved");
+  const chat = await directChatBetween(specialistId, customerId);
+  await postSystemMessage(
+    chat.id, userId, me?.name || "",
+    `ЧЕК-ЛИСТ · «${def[idx].label || "слот " + (idx + 1)}» ${decision === "approved" ? "ПРИНЯТ" : "ОТКЛОНЁН — переделайте и сдайте снова"}${allApproved ? " · ВСЕ СЛОТЫ ПРИНЯТЫ — сделку можно закрывать" : ""}`
+  );
+  return { ok: true, allApproved };
+}
+
+// ── СОС — the platform-support signal (admin flow) ──────────────────────────
+// Any deal party presses «СОС»: the ticket lands in the админ-панель AND in
+// the общая библиотека (admins only). An admin accepts → enters the deal's
+// direct chat → talks to both sides → closes the deal either way (the admin
+// bypass in decideApplication/decideInvitation) or blocks a user.
+
+export async function createSosTicket(
+  userId: string,
+  body: { dealType?: string; dealId?: string; reason?: string }
+) {
+  const reason = String(body.reason || "").trim().slice(0, 1000);
+  let chatId = "";
+  let eventTitle = "";
+  let peerNames = "";
+  let dealType = String(body.dealType || "");
+  let dealId = String(body.dealId || "");
+  if ((dealType === "application" || dealType === "invitation") && dealId) {
+    // Bound to a concrete deal: the ticket carries the deal's direct chat.
+    const { event, specialistId, customerId } = await dealForChecklist(userId, dealType, dealId);
+    const chat = await directChatBetween(specialistId, customerId);
+    chatId = chat.id;
+    eventTitle = event.title;
+    const [cust, spec] = await Promise.all([
+      db.user.findUnique({ where: { id: customerId }, select: { name: true } }),
+      db.user.findUnique({ where: { id: specialistId }, select: { name: true } }),
+    ]);
+    peerNames = `${cust?.name || "?"} ⇄ ${spec?.name || "?"}`;
+  } else {
+    // Free СОС (no deal): a support dialog between me and the first admin.
+    dealType = ""; dealId = "";
+    const admin = await db.user.findFirst({ where: { isAdmin: true }, orderBy: { createdAt: "asc" }, select: { id: true } });
+    if (!admin || admin.id === userId) {
+      const chat = await db.smmChat.create({ data: { kind: "direct", aId: userId, bId: userId, title: "" } });
+      chatId = chat.id;
+    } else {
+      const chat = await directChatBetween(userId, admin.id);
+      chatId = chat.id;
+      const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+      peerNames = me?.name || "?";
+    }
+  }
+  const ticket = await db.smmSupportTicket.create({
+    data: { createdById: userId, chatId, dealType, dealId, eventTitle, peerNames, reason },
+  });
+  await telegramNotify(`🆘 СОС: ${peerNames || "?"}${eventTitle ? ` · «${eventTitle}»` : ""}${reason ? ` · ${reason.slice(0, 120)}` : ""}`);
+  return ticket;
+}
+
+async function requireAdmin(userId: string) {
+  const me = await db.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
+  if (!me?.isAdmin) throw ApiError.forbidden("Admins only");
+}
+
+/** Admin: all tickets (newest first) + the users list for the block panel. */
+export async function listAdminData(userId: string) {
+  await requireAdmin(userId);
+  const tickets = await db.smmSupportTicket.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 60,
+    include: { createdBy: { select: { name: true } }, admin: { select: { name: true } } },
+  });
+  const users = await db.user.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 60,
+    select: { id: true, name: true, email: true, smmRole: true, isBlocked: true, isAdmin: true, createdAt: true },
+  });
+  return {
+    tickets: tickets.map((t) => ({
+      id: t.id,
+      status: t.status,
+      eventTitle: t.eventTitle,
+      peerNames: t.peerNames,
+      reason: t.reason,
+      chatId: t.chatId,
+      dealType: t.dealType,
+      dealId: t.dealId,
+      createdByName: t.createdBy?.name || "",
+      adminName: t.admin?.name || "",
+      createdAt: t.createdAt,
+    })),
+    users,
+  };
+}
+
+/** Admin accepts a ticket (enters the chat) or closes it. */
+export async function adminTicketAction(userId: string, id: string, action: string) {
+  await requireAdmin(userId);
+  const ticket = await db.smmSupportTicket.findUnique({ where: { id } });
+  if (!ticket) throw ApiError.notFound("Ticket not found");
+  if (action === "accept") {
+    if (ticket.status === "closed") throw ApiError.conflict("Ticket closed");
+    const updated = await db.smmSupportTicket.update({
+      where: { id }, data: { status: "accepted", adminId: userId },
+    });
+    const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+    await postSystemMessage(ticket.chatId, userId, me?.name || "", `АДМИН подключился к чату (СОС принят)`);
+    return updated;
+  }
+  if (action === "close") {
+    const updated = await db.smmSupportTicket.update({
+      where: { id }, data: { status: "closed", adminId: ticket.adminId || userId, closedAt: new Date() },
+    });
+    return updated;
+  }
+  throw ApiError.badRequest("action must be accept or close");
+}
+
+/** Admin blocks / unblocks a user (login + every authed call refuse). */
+export async function adminSetUserBlocked(userId: string, targetId: string, blocked: boolean) {
+  await requireAdmin(userId);
+  if (targetId === userId) throw ApiError.badRequest("You cannot block yourself");
+  const target = await db.user.findUnique({ where: { id: targetId } });
+  if (!target) throw ApiError.notFound("User not found");
+  if (target.isAdmin && blocked) throw ApiError.badRequest("You cannot block an admin");
+  const updated = await db.user.update({ where: { id: targetId }, data: { isBlocked: blocked } });
+  if (blocked) {
+    // Kill every live session — the cookie dies instantly.
+    await db.session.deleteMany({ where: { userId: targetId } });
+    await telegramNotify(`⛔ Пользователь заблокирован: ${target.name} (${target.email})`);
+  }
+  return { id: updated.id, isBlocked: updated.isBlocked };
+}
+
+// ── REAL-TIME CHAT (long-poll) ──────────────────────────────────────────────
+// Vercel's webhooks are deploy events — they cannot push into a browser. The
+// Vercel-native realtime here is a LONG-POLL: the request is held on the
+// server (Node function, maxDuration 60s) and answers the moment new messages
+// exist (checked every 800ms) — ~1s end-to-end latency, zero infrastructure.
+// The client re-opens the poll immediately after every answer.
+
+export async function pollChatMessages(userId: string, chatId: string, after: string | undefined, waitMs: number) {
+  const chat = await db.smmChat.findUnique({ where: { id: chatId } });
+  if (!chat) throw ApiError.notFound("Chat not found");
+  const wait = Math.max(0, Math.min(25000, Number(waitMs) || 0));
+  const deadline = Date.now() + wait;
+  let messages = await db.smmChatMessage.findMany({
+    where: { scopeType: "chat", scopeId: chatId, ...(after ? { createdAt: { gt: new Date(after) } } : {}) },
+    orderBy: { createdAt: "asc" },
+    take: 300,
+  });
+  while (messages.length === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 800));
+    messages = await db.smmChatMessage.findMany({
+      where: { scopeType: "chat", scopeId: chatId, ...(after ? { createdAt: { gt: new Date(after) } } : {}) },
+      orderBy: { createdAt: "asc" },
+      take: 300,
+    });
+  }
+  return { messages };
 }

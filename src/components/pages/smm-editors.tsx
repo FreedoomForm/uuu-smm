@@ -167,6 +167,9 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
   // an old order never loses what it carried
   const [testIds, setTestIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  // ЧЕК-ЛИСТ СДАЧИ: the delivery slots the specialist must fill on the
+  // accepted deal — each slot = WHAT the file/link must be ({ label, desc })
+  const [checklist, setChecklist] = useState<{ label: string; desc: string }[]>([]);
   const [coverColor, setCoverColor] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(true);
   // Version rule (the SAME one the tests keep): a VERSION (a copy of somebody
@@ -189,13 +192,14 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
         setFormat(e.format || 'online'); setPlatform(e.platform || 'instagram');
         setLocation(e.location || ''); setTimeAt(e.timeAt || '');
         setTestIds(e.testIds || []); setAttachments(((e as SmmEventT).attachments || []) as AttachmentItem[]);
+        setChecklist(Array.isArray((e as any).checklist) ? (e as any).checklist : []);
         setCoverColor(e.coverColor || null);
         setIsVersion(!!e.parentId);
         setIsPublic(e.isPublic !== false);
       }).catch(() => onFail()).finally(() => setLoading(false));
     } else {
       setTitle(''); setSummary(''); setCategory('other'); setBarter(''); setBudget(''); setFormat('online'); setPlatform('instagram');
-      setLocation(''); setTimeAt(''); setTestIds([]); setAttachments([]); setCoverColor(null); setIsPublic(true); setIsVersion(false);
+      setLocation(''); setTimeAt(''); setTestIds([]); setAttachments([]); setChecklist([]); setCoverColor(null); setIsPublic(true); setIsVersion(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, myId]);
@@ -204,7 +208,7 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
     if (!title.trim()) { smmToast(t('smmEventTitle')); return; }
     setSaving(true); onSaving?.(true);
     try {
-      const payload = { title, summary, category, barter: category === 'blogger-tour' ? barter : '', budget, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, attachments, coverColor, isPublic };
+      const payload = { title, summary, category, barter: category === 'blogger-tour' ? barter : '', budget, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, attachments, coverColor, isPublic, checklist: checklist.filter(c => c.label.trim() || c.desc.trim()) };
       const saved = editingId ? await api.updateEvent(editingId, payload) : await api.createEvent(payload);
       smmToast(t('smmEventSaved'));
       onSaved(saved as SmmEventT);
@@ -288,6 +292,35 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm font-bold">{t('smmEventTime')}</Label>
             <Input value={timeAt} onChange={e => setTimeAt(e.target.value)} placeholder={t('smmEventTimePh')} className="h-10 rounded-2xl border-black/20 bg-white" />
+          </div>
+          {/* ── ЧЕК-ЛИСТ СДАЧИ: the delivery slots the accepted-deal specialist
+          must fill — for EVERY slot the customer describes WHAT the file/link
+          must be (e.g. «скрин отчёта о охватах», «ссылка на reel с рекламой») */}
+          <div className="flex flex-col gap-2 rounded-3xl border-2 border-dashed border-black/20 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-sm font-bold">{t('smmEventChecklistTitle')}</Label>
+              <button type="button" onClick={() => setChecklist(prev => [...prev, { label: '', desc: '' }])}
+                className="h-8 px-3 rounded-full bg-cta text-white text-xs font-bold">
+                + {t('smmEventChecklistAdd')}
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">{t('smmEventChecklistHint')}</p>
+            {checklist.map((c, i) => (
+              <div key={i} className="rounded-2xl border border-black/10 p-2.5 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-muted-foreground shrink-0">{i + 1}.</span>
+                  <Input value={c.label} onChange={e => setChecklist(prev => prev.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                    placeholder={t('smmEventChecklistLabelPh')} className="h-9 rounded-xl border-black/20 bg-white text-sm" />
+                  <button type="button" onClick={() => setChecklist(prev => prev.filter((_, j) => j !== i))}
+                    className="shrink-0 w-8 h-8 rounded-full border border-destructive/40 text-destructive flex items-center justify-center" aria-label="remove">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <Input value={c.desc} onChange={e => setChecklist(prev => prev.map((x, j) => (j === i ? { ...x, desc: e.target.value } : x)))}
+                  placeholder={t('smmEventChecklistDescPh')} className="h-9 rounded-xl border-black/10 bg-black/[0.02] text-xs" />
+              </div>
+            ))}
+            {checklist.length === 0 && <p className="text-[11px] text-muted-foreground text-center py-1">{t('smmEventChecklistEmpty')}</p>}
           </div>
           {/* cover */}
           <div className="flex flex-col gap-1.5">

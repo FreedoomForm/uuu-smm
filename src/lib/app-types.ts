@@ -341,8 +341,42 @@ export interface SmmRequestRowT {
   roleId: string;
   roleName: string;
   counterpartyName: string;
+  // The chat page needs the real peer id (open their profile / direct chat)
+  counterpartyId?: string;
   // 'sent' = my own request (withdrawable), 'incoming' = arrived for me
   direction?: 'sent' | 'incoming';
+}
+
+// ЧЕК-ЛИСТ СДАЧИ — one delivery slot on an accepted deal (see the service)
+export interface SmmChecklistItemT {
+  idx: number;
+  label: string;
+  desc: string;
+  value: string;
+  valueKind: 'link' | 'file';
+  status: 'pending' | 'submitted' | 'approved' | 'declined';
+  note: string;
+  updatedAt: string;
+}
+
+// СОС-тикет in the админ-панель
+export interface SmmTicketT {
+  id: string;
+  status: 'open' | 'accepted' | 'closed';
+  eventTitle: string;
+  peerNames: string;
+  reason: string;
+  chatId: string;
+  dealType: string;
+  dealId: string;
+  createdByName: string;
+  adminName: string;
+  createdAt: string;
+}
+
+export interface SmmAdminDataT {
+  tickets: SmmTicketT[];
+  users: { id: string; name: string; email: string; smmRole: string; isBlocked: boolean; isAdmin: boolean; createdAt: string }[];
 }
 
 // A review received on the profile («Отзывы» block)

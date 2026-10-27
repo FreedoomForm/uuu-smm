@@ -22,6 +22,7 @@ import {
   assertRateLimit,
 } from "./rate-limit";
 import { sessionUserId } from "../auth/session";
+import { db } from "@/lib/db";
 
 export type ApiContext = {
   req: NextRequest;
@@ -117,7 +118,9 @@ export function withApi(
 /**
  * Wrap an AUTHENTICATED endpoint. The session resolution in withApi already
  * proves the user exists (the cookie maps to a live Session row), so no
- * extra DB round-trip is needed here.
+ * extra DB round-trip is needed here — EXCEPT the admin-block check: a
+ * blocked user keeps a valid session cookie, so every authed call re-checks
+ * the flag (one indexed findUnique on the primary key) and rejects with 403.
  */
 export function withApiAuth(
   handler: Handler<AuthedApiContext>,
@@ -126,6 +129,13 @@ export function withApiAuth(
   return withApi(async (ctx) => {
     if (!ctx.userId) {
       throw ApiError.unauthorized("Not authenticated");
+    }
+    const me = await db.user.findUnique({
+      where: { id: ctx.userId },
+      select: { isBlocked: true },
+    });
+    if (me?.isBlocked) {
+      throw ApiError.forbidden("Account blocked");
     }
     return handler({ ...ctx, userId: ctx.userId });
   }, opts);

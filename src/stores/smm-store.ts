@@ -14,7 +14,7 @@ export type SmmMode = 'specialist' | 'customer';
 // author window opened by tapping the author strip on any card; 'files' =
 // the attached files of ONE card — the event's qualification tests / the
 // post's media collection, the same contract the tests files window keeps)
-export type SmmTopWindow = 'none' | 'bookmarks' | 'chats' | 'requests' | 'profile' | 'files' | 'card-chat' | 'map';
+export type SmmTopWindow = 'none' | 'bookmarks' | 'chats' | 'requests' | 'profile' | 'files' | 'card-chat' | 'map' | 'chat' | 'checklist' | 'admin';
 
 // The card whose GROUP chat window is open (topWindow === 'card-chat') —
 // the «Чат» button on every card opens everyone's chat about THIS card,
@@ -59,6 +59,25 @@ export interface SmmInviteCtx {
   estimate: number | null;
 }
 
+// The direct dialog the FULLSCREEN chat window shows (topWindow === 'chat'):
+// accepted deal → the customer ↔ specialist page-chat with the same top /
+// bottom panels as the main page; tapping the peer opens their profile.
+export interface SmmChatPageCtx {
+  chatId: string;
+  peerId: string;
+  peerName: string;
+  peerImage?: string | null;
+  title?: string; // the deal's event title (the chat header subtitle)
+}
+
+// The deal whose checklist window is open (topWindow === 'checklist')
+export interface SmmChecklistCtx {
+  dealType: 'application' | 'invitation';
+  dealId: string;
+  eventTitle: string;
+  counterpartyName: string;
+}
+
 interface SmmData {
   // Active mode from the second bottom panel (persisted to User.smmRole)
   smmMode: SmmMode;
@@ -91,6 +110,10 @@ interface SmmData {
   filesTarget: SmmFilesTarget | null;
   // The card whose group chat window is open (topWindow === 'card-chat')
   cardChat: SmmCardChatTarget | null;
+  // The fullscreen chat page context (topWindow === 'chat')
+  chatPage: SmmChatPageCtx | null;
+  // The deal whose checklist window is open (topWindow === 'checklist')
+  checklistCtx: SmmChecklistCtx | null;
 }
 
 const INITIAL: SmmData = {
@@ -109,6 +132,8 @@ const INITIAL: SmmData = {
   profileUserId: null,
   filesTarget: null,
   cardChat: null,
+  chatPage: null,
+  checklistCtx: null,
   applyResults: {},
 };
 

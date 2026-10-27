@@ -20,14 +20,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { tUI } from '@/lib/i18n';
 import { CreatorStrip } from '@/components/shared-bits';
 import {
-  ArrowLeft, Bot, ChevronDown, ChevronUp, Compass, Edit, Film, Library, LayoutGrid, Loader2, MessageCircle, MessageSquare,
-  Paperclip, Pencil, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList,
+  ArrowLeft, Bot, ChevronDown, ChevronUp, Compass, Edit, Film, Library, LayoutGrid, Link2, Loader2, MessageCircle, MessageSquare,
+  Paperclip, Pencil, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList, ClipboardCheck, Siren, Shield, Upload,
   Map as MapIcon,
 } from 'lucide-react';
 // Professional feed engine — the SAME Swiper setup the tests feed runs
@@ -150,6 +151,8 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const profileUserId = useSmmStore(s => s.profileUserId);
   const filesTarget = useSmmStore(s => s.filesTarget);
   const cardChat = useSmmStore(s => s.cardChat);
+  const chatPage = useSmmStore(s => s.chatPage);
+  const checklistCtx = useSmmStore(s => s.checklistCtx);
 
   // ── data ────────────────────────────────────────────────────────────────
   const [items, setItems] = useState<AnyItem[]>([]);
@@ -161,6 +164,24 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const [chatMessages, setChatMessages] = useState<import('@/lib/app-types').SmmChatMessageT[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [requests, setRequests] = useState<SmmRequestRowT[]>([]);
+  // ── ЧАТ-СТРАНИЦА (topWindow 'chat') — the accepted-deal fullscreen dialog
+  const [pageMessages, setPageMessages] = useState<import('@/lib/app-types').SmmChatMessageT[]>([]);
+  const [pageInput, setPageInput] = useState('');
+  const pageEndRef = useRef<HTMLDivElement | null>(null);
+  // ── ЧЕК-ЛИСТ window state
+  const [clDeals, setClDeals] = useState<SmmRequestRowT[]>([]);
+  const [clData, setClData] = useState<{ eventTitle: string; items: import('@/lib/app-types').SmmChecklistItemT[]; approved: number; total: number; allApproved: boolean } | null>(null);
+  const [clLoading, setClLoading] = useState(false);
+  const [clValues, setClValues] = useState<Record<number, string>>({});
+  const [clBusy, setClBusy] = useState<number | null>(null);
+  // ── ADMIN window + СОС dialog state
+  const [adminData, setAdminData] = useState<import('@/lib/app-types').SmmAdminDataT | null>(null);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [openSosCount, setOpenSosCount] = useState(0);
+  const [sosOpen, setSosOpen] = useState(false);
+  const [sosReason, setSosReason] = useState('');
+  const [sosDeal, setSosDeal] = useState(''); // 'dealType:dealId' | ''
+  const [sosSending, setSosSending] = useState(false);
   // Отзыв modal state (the deal review left after BOTH sides complete)
   const [reviewCtx, setReviewCtx] = useState<{ kind: 'application' | 'invitation'; id: string; title: string; counterparty: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(0);
@@ -237,6 +258,8 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
 
   const myId = effectiveUser?.id || '';
   const isSpecialist = smmMode === 'specialist';
+  // СОС / админ-панель — only the platform admin sees the entry (User.isAdmin)
+  const isAdminUser = (effectiveUser as any)?.isAdmin === true;
   // личная библиотека (mine) vs публичная (discover) — the first dock
   const personal = !discoverMode;
 
@@ -318,6 +341,139 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topWindow]);
 
+  // ── ЧАТ-СТРАНИЦА: initial load + the LONG-POLL loop (the server holds each
+  // request until new messages arrive — ~1s delivery, the Vercel-native
+  // realtime; re-opened immediately after every answer).
+  useEffect(() => {
+    if (topWindow !== 'chat' || !chatPage?.chatId) { setPageMessages([]); return; }
+    let alive = true;
+    let lastAfter = '';
+    (async () => {
+      try {
+        const r = await api.getSmmChatMessages(chatPage.chatId);
+        if (!alive) return;
+        setPageMessages(r.messages || []);
+        const lm = (r.messages || [])[(r.messages || []).length - 1];
+        lastAfter = lm?.createdAt || '';
+      } catch { /* ignore */ }
+      while (alive) {
+        try {
+          const r = await api.pollChatMessages(chatPage.chatId, lastAfter);
+          if (!alive) break;
+          if (r.messages?.length) {
+            setPageMessages(prev => {
+              const fresh = r.messages.filter(m => !prev.some(p => p.id === m.id));
+              return fresh.length ? [...prev, ...fresh] : prev;
+            });
+            lastAfter = r.messages[r.messages.length - 1].createdAt;
+          }
+        } catch { await new Promise(res => setTimeout(res, 1500)); }
+      }
+    })();
+    return () => { alive = false; };
+  }, [topWindow, chatPage?.chatId]);
+
+  useEffect(() => {
+    pageEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [pageMessages.length, chatPage?.chatId]);
+
+  // The chats-window dialog ALSO speeds up: full load once, then the same
+  // long-poll loop (was a flat 4s interval).
+  useEffect(() => {
+    if (!openChatId) { setChatMessages([]); return; }
+    let alive = true;
+    let lastAfter = '';
+    (async () => {
+      try {
+        const r = await api.getSmmChatMessages(openChatId);
+        if (!alive) return;
+        setChatMessages(r.messages || []);
+        const lm = (r.messages || [])[(r.messages || []).length - 1];
+        lastAfter = lm?.createdAt || '';
+      } catch { /* ignore */ }
+      while (alive) {
+        try {
+          const r = await api.pollChatMessages(openChatId, lastAfter);
+          if (!alive) break;
+          if (r.messages?.length) {
+            setChatMessages(prev => {
+              const fresh = r.messages.filter(m => !prev.some(p => p.id === m.id));
+              return fresh.length ? [...prev, ...fresh] : prev;
+            });
+            lastAfter = r.messages[r.messages.length - 1].createdAt;
+          }
+        } catch { await new Promise(res => setTimeout(res, 1500)); }
+      }
+    })();
+    return () => { alive = false; };
+  }, [openChatId]);
+
+  // ── ЧЕК-ЛИСТ window: the deal list (accepted deals) + the merged checklist
+  const loadChecklistDeals = useCallback(async () => {
+    try {
+      const [apps, invs] = await Promise.all([
+        api.getApplications().catch(() => ({ items: [] })),
+        api.getInvitations().catch(() => ({ items: [] })),
+      ]);
+      const merged = [...(apps.items || []), ...(invs.items || [])]
+        .filter((r: any) => r.status === 'accepted')
+        .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setClDeals(merged as SmmRequestRowT[]);
+      return merged as SmmRequestRowT[];
+    } catch { setClDeals([]); return []; }
+  }, []);
+
+  const fetchChecklist = useCallback(async (dealType: string, dealId: string) => {
+    setClLoading(true);
+    try {
+      const r = await api.getChecklist(dealType as 'application' | 'invitation', dealId);
+      setClData(r);
+    } catch (e: any) { setClData(null); toast(e?.message || 'Error'); } finally { setClLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (topWindow !== 'checklist') { setClData(null); setClValues({}); return; }
+    let alive = true;
+    (async () => {
+      if (checklistCtx) { void fetchChecklist(checklistCtx.dealType, checklistCtx.dealId); return; }
+      const deals = await loadChecklistDeals();
+      if (!alive) return;
+      if (deals.length > 0) {
+        const first = deals[0];
+        useSmmStore.setState({ checklistCtx: { dealType: first.kind, dealId: first.id, eventTitle: first.eventTitle, counterpartyName: first.counterpartyName } });
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topWindow]);
+
+  useEffect(() => {
+    if (topWindow === 'checklist' && checklistCtx) void fetchChecklist(checklistCtx.dealType, checklistCtx.dealId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checklistCtx?.dealId]);
+
+  // ── ADMIN window: tickets + users
+  const loadAdminData = useCallback(async () => {
+    setAdminLoading(true);
+    try {
+      const r = await api.getAdminData();
+      setAdminData(r);
+      setOpenSosCount((r.tickets || []).filter((x: any) => x.status === 'open').length);
+    } catch { setAdminData(null); } finally { setAdminLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (topWindow === 'admin') { void loadAdminData(); return; }
+    // The admin's SOS badge: a light refresh while they browse the main page
+    if (isAdminUser && topWindow === 'none') {
+      let alive = true;
+      api.getAdminData().then((r) => { if (alive) setOpenSosCount((r.tickets || []).filter((x: any) => x.status === 'open').length); }).catch(() => {});
+      const iv = setInterval(() => { api.getAdminData().then((r) => { if (alive) setOpenSosCount((r.tickets || []).filter((x: any) => x.status === 'open').length); }).catch(() => {}); }, 45000);
+      return () => { alive = false; clearInterval(iv); };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topWindow, isAdminUser]);
+
   // The profile window data — refetched for every profileUserId (and after a
   // refresh bump, e.g. an invite sent from the profile)
   useEffect(() => {
@@ -344,20 +500,8 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topWindow, profileUserId, refreshNonce]);
 
-  // open chat messages + poll
-  useEffect(() => {
-    if (!openChatId) { setChatMessages([]); return; }
-    let alive = true;
-    const fetchMsgs = async () => {
-      try {
-        const r = await api.getSmmChatMessages(openChatId);
-        if (alive) setChatMessages(r.messages || []);
-      } catch { /* ignore */ }
-    };
-    void fetchMsgs();
-    const iv = setInterval(fetchMsgs, 4000);
-    return () => { alive = false; clearInterval(iv); };
-  }, [openChatId]);
+  // open chat messages + poll — REPLACED by the long-poll loop above (the
+  // old flat 4s interval delivered messages up to 4s late).
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -621,6 +765,114 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       toast(decision === 'accepted' ? t('smmAcceptToast') : t('smmDeclineToast'));
       void loadRequests();
       useSmmStore.setState((s: any) => ({ refreshNonce: (s.refreshNonce || 0) + 1 }));
+      // ПРИНЯТО → both parties land in the deal's chat page (the same top /
+      // bottom panels as the main page) — the work talk starts immediately.
+      if (decision === 'accepted' && row.counterpartyId) {
+        void openChatWith(row.counterpartyId, row.counterpartyName, row.eventTitle);
+      }
+    } catch (e: any) { toast(e?.message || 'Error'); }
+  };
+
+  // ── ЧАТ-СТРАНИЦА — find-or-create the direct dialog and open the fullscreen
+  // chat window (top panel + the input bar + the bottom docks stay)
+  const openChatWith = async (peerId: string, peerName: string, title?: string, peerImage?: string | null) => {
+    if (!peerId) return;
+    try {
+      const chat = await api.createSmmChat('', peerId);
+      useSmmStore.setState({
+        chatPage: { chatId: chat.id, peerId, peerName, peerImage: peerImage || null, title },
+        topWindow: 'chat', openChatId: null, filesTarget: null, cardChat: null,
+      });
+    } catch (e: any) { toast(e?.message || 'Error'); }
+  };
+
+  const sendPageChat = async () => {
+    const text = pageInput.trim();
+    if (!text || !chatPage) return;
+    setPageInput('');
+    try {
+      const msg = await api.sendSmmChatMessage(chatPage.chatId, text);
+      setPageMessages(prev => (prev.some(p => p.id === msg.id) ? prev : [...prev, msg]));
+    } catch (e: any) { toast(e?.message || 'Error'); }
+  };
+
+  // ── ЧЕК-ЛИСТ actions: the specialist submits a slot, the customer decides
+  const submitChecklist = async (idx: number, value: string, valueKind: 'link' | 'file') => {
+    if (!checklistCtx) return;
+    if (!value.trim()) { toast(t('smmChecklistNeedValue')); return; }
+    setClBusy(idx);
+    try {
+      await api.submitChecklistItem(checklistCtx.dealType, checklistCtx.dealId, idx, value.trim(), valueKind);
+      toast(t('smmChecklistSubmittedToast'));
+      setClValues(prev => ({ ...prev, [idx]: '' }));
+      void fetchChecklist(checklistCtx.dealType, checklistCtx.dealId);
+    } catch (e: any) { toast(e?.message || 'Error'); } finally { setClBusy(null); }
+  };
+
+  const uploadChecklistFile = async (idx: number, file: File) => {
+    if (!checklistCtx) return;
+    setClBusy(idx);
+    try {
+      const r = await api.uploadFile(file);
+      await api.submitChecklistItem(checklistCtx.dealType, checklistCtx.dealId, idx, r.url, 'file');
+      toast(t('smmChecklistSubmittedToast'));
+      void fetchChecklist(checklistCtx.dealType, checklistCtx.dealId);
+    } catch (e: any) { toast(e?.message || 'Error'); } finally { setClBusy(null); }
+  };
+
+  const decideChecklist = async (idx: number, decision: 'approved' | 'declined') => {
+    if (!checklistCtx) return;
+    setClBusy(idx);
+    try {
+      const r = await api.decideChecklistItem(checklistCtx.dealType, checklistCtx.dealId, idx, decision);
+      toast(decision === 'approved' ? t('smmChecklistApprovedToast') : t('smmChecklistDeclinedToast'));
+      if (r?.allApproved) toast(t('smmChecklistAllDoneToast'));
+      void fetchChecklist(checklistCtx.dealType, checklistCtx.dealId);
+    } catch (e: any) { toast(e?.message || 'Error'); } finally { setClBusy(null); }
+  };
+
+  // ── СОС: send the support signal (bound to a picked deal or free-form)
+  const sendSos = async () => {
+    if (sosSending) return;
+    setSosSending(true);
+    try {
+      const [dealType, dealId] = sosDeal ? sosDeal.split(':') : ['', ''];
+      await api.createSos({ dealType, dealId, reason: sosReason.trim() });
+      toast(t('smmSosSentToast'));
+      setSosOpen(false); setSosReason(''); setSosDeal('');
+    } catch (e: any) { toast(e?.message || 'Error'); } finally { setSosSending(false); }
+  };
+
+  // ── ADMIN actions: accept/close a ticket, force-decide the deal, block
+  const adminAct = async (ticketId: string, action: 'accept' | 'close') => {
+    try {
+      await api.adminTicketAction(ticketId, action);
+      if (action === 'accept') void loadAdminData();
+      else { toast(t('smmAdminClosedToast')); void loadAdminData(); }
+    } catch (e: any) { toast(e?.message || 'Error'); }
+  };
+
+  const adminOpenTicketChat = (tk: { chatId: string; peerNames: string; eventTitle: string }) => {
+    useSmmStore.setState({
+      chatPage: { chatId: tk.chatId, peerId: '', peerName: tk.peerNames || 'СОС', title: tk.eventTitle },
+      topWindow: 'chat', openChatId: null, filesTarget: null, cardChat: null,
+    });
+  };
+
+  const adminDecideDeal = async (dealType: string, dealId: string, decision: 'accepted' | 'declined') => {
+    try {
+      if (dealType === 'application') await api.decideApplication(dealId, decision);
+      else if (dealType === 'invitation') await api.decideInvitation(dealId, decision);
+      else throw new Error('No deal on this ticket');
+      toast(decision === 'accepted' ? t('smmAcceptToast') : t('smmDeclineToast'));
+    } catch (e: any) { toast(e?.message || 'Error'); }
+  };
+
+  const adminBlock = async (userId: string, blocked: boolean) => {
+    try {
+      await api.adminSetBlocked(userId, blocked);
+      toast(blocked ? t('smmAdminBlockedToast') : t('smmAdminUnblockedToast'));
+      void loadAdminData();
     } catch (e: any) { toast(e?.message || 'Error'); }
   };
 
@@ -1045,8 +1297,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   // «Подать заявку» / «Изменить» behavior.
   const barAction = (() => {
     // the MAP window keeps the frame but drops the context bar — the map has
-    // its own floating «добавить спот» control
-    if (topWindow === 'map') return null;
+    // its own floating «добавить спот» control; the chat page / checklist /
+    // admin windows carry their own bottom bars instead
+    if (topWindow === 'map' || topWindow === 'chat' || topWindow === 'checklist' || topWindow === 'admin') return null;
     // the profile window: a customer invites the viewed specialist right
     // from here (the same пригласить bar the specialist card carries)
     if (topWindow === 'profile') {
@@ -1100,6 +1353,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     : topWindow === 'chats' ? t('smmTopChats')
     : topWindow === 'requests' ? t('smmRequestsMine')
     : topWindow === 'profile' ? t('smmViewProfile')
+    : topWindow === 'chat' ? (chatPage?.peerName || t('smmChatPage'))
+    : topWindow === 'checklist' ? t('smmChecklist')
+    : topWindow === 'admin' ? t('smmAdmin')
     : topWindow === 'map' ? t('mapTitle') : null;
 
   const renderCard = (it: AnyItem, selected: boolean, variant: 'grid' | 'shelf' | 'slide' | 'feed') => {
@@ -1117,6 +1373,197 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       // back arrow in the top panel closes the window. Scope/add controls
       // float over the map itself.
       return <SpotsEmbed lang={lang} myId={myId} authed={!!effectiveUser} />;
+    }
+    if (topWindow === 'chat' && chatPage) {
+      // ── ЧАТ-СТРАНИЦА (the accepted-deal dialog): the SAME shell as the main
+      // page (top panel + bottom docks) — the messages fill the middle, the
+      // input sits on its own bar above the library dock. Realtime = the
+      // long-poll loop (~1s delivery). Tapping the header peer → profile.
+      return (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
+            <div className="max-w-2xl mx-auto flex flex-col gap-2">
+              {pageMessages.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">—</p>}
+              {pageMessages.map(m => {
+                const mine = m.userId === myId;
+                return (
+                  <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.kind === 'system' ? 'bg-[#FFF0D9] border border-black/10 text-black/80' : mine ? 'bg-cta text-white' : 'bg-muted'}`}>
+                      {!mine && m.kind !== 'system' && <p className="text-[10px] font-bold opacity-70 mb-0.5">{m.userName}</p>}
+                      <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={pageEndRef} />
+            </div>
+          </div>
+          <div className="desktop-dock desktop-dock-raised shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
+            <div className="max-w-2xl mx-auto px-3 py-2 flex gap-2">
+              <Input value={pageInput} onChange={e => setPageInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPageChat(); } }}
+                placeholder={t('smmChatMessage')} className="h-9 lg:h-10 rounded-full bg-white border-black/15" />
+              <Button size="sm" onClick={sendPageChat} className="h-9 lg:h-10 rounded-full shrink-0"><Send className="w-4 h-4" /></Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (topWindow === 'checklist') {
+      // ── ЧЕК-ЛИСТ СДАЧИ: the specialist submits every slot (link / file),
+      // the customer approves or declines each one. The slots come from the
+      // event editor (the customer defined WHAT must be delivered there).
+      const clIsSpec = isSpecialist;
+      return (
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
+          <div className="max-w-2xl mx-auto flex flex-col gap-3">
+            {clDeals.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {clDeals.map(d => {
+                  const active = checklistCtx?.dealId === d.id;
+                  return (
+                    <button key={d.id} onClick={() => useSmmStore.setState({ checklistCtx: { dealType: d.kind, dealId: d.id, eventTitle: d.eventTitle, counterpartyName: d.counterpartyName } })}
+                      className={`shrink-0 max-w-[240px] rounded-full border px-3 py-1.5 text-xs font-bold truncate ${active ? 'bg-cta text-white border-cta' : 'border-black/20 bg-white text-black/70'}`}>
+                      {d.eventTitle} · {d.counterpartyName}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {clLoading && <p className="text-sm text-muted-foreground flex items-center gap-2 justify-center py-10"><Loader2 className="w-4 h-4 animate-spin" /> {t('loading')}</p>}
+            {!clLoading && !clData && (
+              <div className="text-center py-10 space-y-3">
+                <ClipboardCheck className="w-10 h-10 mx-auto text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">{t('smmChecklistEmpty')}</p>
+                <Button size="sm" variant="outline" className="rounded-full border-black" onClick={() => useSmmStore.setState({ topWindow: 'requests' })}>{t('smmRequestsMine')}</Button>
+              </div>
+            )}
+            {clData && checklistCtx && (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold truncate">{clData.eventTitle}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{checklistCtx.counterpartyName}</p>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full text-[10px] shrink-0">{t('smmChecklistProgress', { approved: clData.approved, total: clData.total })}</Badge>
+                </div>
+                {clData.total === 0 && <p className="text-sm text-muted-foreground text-center py-6">{t('smmChecklistNoSlots')}</p>}
+                {clData.allApproved && (
+                  <div className="rounded-2xl bg-[#DFF3E8] border border-black/10 px-3 py-2 text-xs font-bold text-cta">{t('smmChecklistAllDone')}</div>
+                )}
+                {clData.items.map(item => (
+                  <Card key={item.idx} className="rounded-3xl border border-black bg-white">
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold">{item.idx + 1}. {item.label || t('smmChecklistSlot')}</p>
+                          {item.desc && <p className="text-xs text-muted-foreground mt-0.5">{item.desc}</p>}
+                        </div>
+                        <Badge variant="secondary" className={`rounded-full text-[10px] shrink-0 ${item.status === 'approved' ? 'bg-[#DFF3E8]' : item.status === 'declined' ? 'bg-red-100 text-red-600' : item.status === 'submitted' ? 'bg-[#FFF0D9]' : ''}`}>
+                          {item.status === 'pending' ? t('smmChecklistPending') : item.status === 'submitted' ? t('smmChecklistSubmitted') : item.status === 'approved' ? t('smmChecklistApproved') : t('smmChecklistDeclined')}
+                        </Badge>
+                      </div>
+                      {(item.status === 'submitted' || item.status === 'approved') && item.value && (
+                        item.valueKind === 'file' ? (
+                          <a href={mediaSrc(item.value)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-bold text-cta underline truncate"><Paperclip className="w-3.5 h-3.5 shrink-0" /> {t('smmChecklistFile')}</a>
+                        ) : (
+                          <a href={item.value} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-bold text-cta underline truncate"><Link2 className="w-3.5 h-3.5 shrink-0" /> {item.value.replace(/^https?:\/\//, '')}</a>
+                        )
+                      )}
+                      {clIsSpec && (item.status === 'pending' || item.status === 'declined') && (
+                        <div className="flex flex-col gap-2">
+                          <div className="flex gap-2">
+                            <Input value={clValues[item.idx] || ''} onChange={e => setClValues(prev => ({ ...prev, [item.idx]: e.target.value }))}
+                              placeholder={t('smmChecklistLinkPh')} inputMode="url" className="h-9 rounded-full border-black/20 bg-white text-sm" />
+                            <Button size="sm" disabled={clBusy === item.idx} onClick={() => submitChecklist(item.idx, clValues[item.idx] || '', 'link')} className="h-9 rounded-full shrink-0">{t('smmChecklistSubmit')}</Button>
+                          </div>
+                          <label className="flex items-center justify-center gap-1.5 h-9 rounded-full border border-dashed border-black/30 text-xs font-bold cursor-pointer text-muted-foreground">
+                            <Upload className="w-3.5 h-3.5" /> {t('smmChecklistUpload')}
+                            <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void uploadChecklistFile(item.idx, f); e.target.value = ''; }} />
+                          </label>
+                        </div>
+                      )}
+                      {!clIsSpec && item.status === 'submitted' && (
+                        <div className="flex gap-2">
+                          <Button size="sm" disabled={clBusy === item.idx} onClick={() => decideChecklist(item.idx, 'approved')} className="h-8 rounded-full flex-1">{t('smmChecklistApprove')}</Button>
+                          <Button size="sm" variant="outline" disabled={clBusy === item.idx} onClick={() => decideChecklist(item.idx, 'declined')} className="h-8 rounded-full flex-1 border-destructive/50 text-destructive">{t('smmChecklistDeclineBtn')}</Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+    if (topWindow === 'admin') {
+      // ── АДМИН-ПАНЕЛЬ: the СОС tickets (accept → enter the deal chat; close;
+      // force-close the deal either way) + the users (block / unblock).
+      return (
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
+          <div className="max-w-2xl mx-auto flex flex-col gap-3">
+            {adminLoading && <p className="text-sm text-muted-foreground flex items-center gap-2 justify-center py-10"><Loader2 className="w-4 h-4 animate-spin" /> {t('loading')}</p>}
+            {!adminLoading && adminData && (
+              <>
+                <p className="text-sm font-bold">{t('smmAdminTickets')}</p>
+                {adminData.tickets.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">{t('smmAdminEmpty')}</p>}
+                {adminData.tickets.map(tk => (
+                  <Card key={tk.id} className="rounded-3xl border border-black bg-white">
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold truncate">{tk.peerNames || tk.createdByName}</p>
+                          {tk.eventTitle && <p className="text-xs text-muted-foreground truncate">«{tk.eventTitle}»</p>}
+                          {tk.reason && <p className="text-xs mt-1">{tk.reason}</p>}
+                          <p className="text-[10px] text-muted-foreground mt-1">{new Date(tk.createdAt).toLocaleString()} · {tk.createdByName}</p>
+                        </div>
+                        <Badge variant="secondary" className={`rounded-full text-[10px] shrink-0 ${tk.status === 'open' ? 'bg-red-100 text-red-600' : tk.status === 'accepted' ? 'bg-[#FFF0D9]' : 'bg-[#DFF3E8]'}`}>
+                          {tk.status === 'open' ? t('smmAdminTicketOpen') : tk.status === 'accepted' ? t('smmAdminTicketAccepted') : t('smmAdminTicketClosed')}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {tk.status !== 'closed' && (
+                          <Button size="sm" onClick={() => adminOpenTicketChat(tk)} className="h-8 rounded-full text-xs">{t('smmAdminOpenChat')}</Button>
+                        )}
+                        {tk.status === 'open' && (
+                          <Button size="sm" variant="outline" onClick={() => adminAct(tk.id, 'accept')} className="h-8 rounded-full text-xs border-black/30">{t('smmAdminAccept')}</Button>
+                        )}
+                        {tk.status !== 'closed' && (
+                          <Button size="sm" variant="outline" onClick={() => adminAct(tk.id, 'close')} className="h-8 rounded-full text-xs border-black/30">{t('smmAdminClose')}</Button>
+                        )}
+                        {!!tk.dealType && tk.dealId && tk.status !== 'closed' && (
+                          <>
+                            <Button size="sm" variant="outline" onClick={() => adminDecideDeal(tk.dealType, tk.dealId, 'accepted')} className="h-8 rounded-full text-xs border-[#DFF3E8] text-cta">{t('smmAdminDealAccept')}</Button>
+                            <Button size="sm" variant="outline" onClick={() => adminDecideDeal(tk.dealType, tk.dealId, 'declined')} className="h-8 rounded-full text-xs border-destructive/50 text-destructive">{t('smmAdminDealDecline')}</Button>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                <p className="text-sm font-bold mt-2">{t('smmAdminUsers')}</p>
+                {adminData.users.map(u => (
+                  <div key={u.id} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold truncate">{u.name}{u.isBlocked ? ' ⛔' : ''}{u.isAdmin ? ' · ' + t('smmAdmin') : ''}</p>
+                      <p className="text-xs text-muted-foreground truncate">{u.email} · {u.smmRole}</p>
+                    </div>
+                    {!u.isAdmin && (
+                      u.isBlocked ? (
+                        <Button size="sm" variant="outline" onClick={() => adminBlock(u.id, false)} className="h-8 rounded-full text-xs shrink-0 border-black/30">{t('smmAdminUnblock')}</Button>
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={() => adminBlock(u.id, true)} className="h-8 rounded-full text-xs shrink-0 border-destructive/50 text-destructive">{t('smmAdminBlock')}</Button>
+                      )
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      );
     }
     if (windowTitle) {
       // ── the ОКНО ПРОФИЛЯ (opened by tapping an author on any card) ──
@@ -1335,6 +1782,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
                 canDecide={canDecide}
                 onAccept={() => decideRow(r, 'accepted')}
                 onDecline={() => decideRow(r, 'declined')}
+                onOpenChat={r.status === 'accepted' && r.counterpartyId ? () => openChatWith(r.counterpartyId!, r.counterpartyName, r.eventTitle) : undefined}
                 onComplete={r.status === 'accepted' ? () => completeDealRow(r) : undefined}
                 onReview={r.status === 'completed' ? () => openReview(r) : undefined}
                 reviewed={!!r.myReview}
@@ -1440,7 +1888,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     );
   };
 
-  const plusHidden = topWindow === 'bookmarks' || topWindow === 'profile' || topWindow === 'map';
+  const plusHidden = topWindow === 'bookmarks' || topWindow === 'profile' || topWindow === 'map' || topWindow === 'chat' || topWindow === 'checklist' || topWindow === 'admin';
   const tw = topWindow as string; // widened read for the JSX comparisons
 
   return (
@@ -1464,13 +1912,34 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
             {(topWindow !== 'none' || openChatId) && (
               <Button variant="outline" size="icon"
-                onClick={() => { if (openChatId) useSmmStore.setState({ openChatId: null }); else useSmmStore.setState({ topWindow: 'none', filesTarget: null, cardChat: null }); }}
+                onClick={() => {
+                  if (openChatId) useSmmStore.setState({ openChatId: null });
+                  else if (topWindow === 'chat') useSmmStore.setState({ topWindow: 'none', chatPage: null });
+                  else if (topWindow === 'checklist') useSmmStore.setState({ topWindow: 'none', checklistCtx: null });
+                  else useSmmStore.setState({ topWindow: 'none', filesTarget: null, cardChat: null });
+                }}
                 className="rounded-full shrink-0 border-black lg:h-10 lg:w-10" title={t('back')} aria-label={t('back')}>
                 <ArrowLeft className="w-4 h-4" />
               </Button>
             )}
             {windowTitle ? (
-              <h1 className="text-base sm:text-lg font-bold truncate">{windowTitle}</h1>
+              topWindow === 'chat' && chatPage ? (
+                // The chat page header IS the peer: tap it → their profile
+                <button onClick={() => chatPage.peerId && useSmmStore.setState({ topWindow: 'profile', profileUserId: chatPage.peerId, chatPage: null })}
+                  className="flex items-center gap-2 min-w-0 text-left" title={t('smmViewProfile')}>
+                  <span className="w-9 h-9 rounded-full bg-cta text-white flex items-center justify-center text-xs font-bold overflow-hidden shrink-0">
+                    {chatPage.peerImage
+                      ? <img src={chatPage.peerImage} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                      : (chatPage.peerName || '?').trim().slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-base sm:text-lg font-bold truncate">{chatPage.peerName}</span>
+                    {chatPage.title && <span className="block text-[11px] text-muted-foreground truncate">{chatPage.title}</span>}
+                  </span>
+                </button>
+              ) : (
+                <h1 className="text-base sm:text-lg font-bold truncate">{windowTitle}</h1>
+              )
             ) : (
               <>
                 <Button onClick={startCreate} className="rounded-full bg-primary hover:bg-primary/90 shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm">
@@ -1487,21 +1956,33 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
             <Button variant="outline" onClick={() => setSearchOpen(true)} className="rounded-full shrink-0 border-black h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10" title={t('searchByTags')} aria-label={t('searchByTags')}>
               <Search className="w-4 h-4" />
             </Button>
-            {/* MAP — the top-panel icon into the Карта спотов window: the map
-            opens INSIDE this main page (top + bottom panels stay), the
-            universal back arrow (left) closes it */}
-            <Button variant="outline" onClick={() => useSmmStore.setState({ topWindow: tw === 'map' ? 'none' : 'map', openChatId: null, filesTarget: null, cardChat: null })}
-              className={`rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10 ${tw === 'map' ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
-              title={t('navMap')} aria-label={t('navMap')}>
-              <MapIcon className="w-4 h-4" />
+            {/* ЧЕК-ЛИСТ — the delivery checklist of the accepted deals: the
+            specialist submits every slot (link / file), the customer approves
+            or declines each one (the slots come from the event editor) */}
+            <Button variant="outline" onClick={() => useSmmStore.setState({ topWindow: tw === 'checklist' ? 'none' : 'checklist', checklistCtx: null, openChatId: null, filesTarget: null, cardChat: null })}
+              className={`rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10 ${tw === 'checklist' ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
+              title={t('smmChecklist')} aria-label={t('smmChecklist')}>
+              <ClipboardCheck className="w-4 h-4" />
             </Button>
-            {/* ИИ-АГЕНТ — the one-button platform automation (plan / ТЗ / идеи /
-            хештеги; ТЗ becomes a real заказ with one tap) */}
-            <Button variant="outline" onClick={() => setAgentOpen(true)}
-              className="rounded-full shrink-0 border-black h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10"
-              title={t('navAgent')} aria-label={t('navAgent')}>
-              <Bot className="w-4 h-4" />
-            </Button>
+            {/* СОС — the platform-support signal: lands in the админ-панель
+            AND in the общая библиотека (admins). Admins see the АДМИН entry
+            instead (their own СОС button would be a call to themselves). */}
+            {isAdminUser ? (
+              <Button variant="outline" onClick={() => useSmmStore.setState({ topWindow: tw === 'admin' ? 'none' : 'admin', openChatId: null, filesTarget: null, cardChat: null })}
+                className={`relative rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10 ${tw === 'admin' ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
+                title={t('smmAdmin')} aria-label={t('smmAdmin')}>
+                <Shield className="w-4 h-4" />
+                {openSosCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center">{openSosCount}</span>
+                )}
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => { setSosOpen(true); void loadRequests(); }}
+                className="rounded-full shrink-0 border-black h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10"
+                title={t('smmSos')} aria-label={t('smmSos')}>
+                <Siren className="w-4 h-4 text-destructive" />
+              </Button>
+            )}
             {!plusHidden && (
               <Button variant="outline" onClick={() => useSmmStore.setState({ topWindow: tw === 'bookmarks' ? 'none' : 'bookmarks', openChatId: null })}
                 className={`rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10 ${tw === 'bookmarks' ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
@@ -1541,6 +2022,12 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       dock at the very bottom and this bar above it — without the raise the
       bar paints OVER the library dock. (The third dock — the role switcher —
       is GONE: separate registration fixed the specialist/customer tab.) */}
+      {isAdminUser && openSosCount > 0 && topWindow === 'none' && (
+        <button onClick={() => useSmmStore.setState({ topWindow: 'admin' })}
+          className="desktop-dock desktop-dock-raised shrink-0 z-40 w-full bg-destructive text-white text-xs font-bold px-4 py-2 flex items-center justify-center gap-2">
+          <Siren className="w-4 h-4" /> {t('smmSosBanner', { n: openSosCount })}
+        </button>
+      )}
       {barAction && (
         <div className="desktop-dock desktop-dock-raised shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
           <div className="max-w-2xl mx-auto px-4 pt-3 pb-3">
@@ -1599,6 +2086,43 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── СОС DIALOG — the platform-support signal: an optional deal pick
+      (any accepted deal) + the reason. Lands in the админ-панель AND in the
+      общая библиотека (admins); the admin enters THIS deal's chat. */}
+      {sosOpen && (
+        <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" onClick={() => setSosOpen(false)}>
+          <div className="bg-white rounded-3xl w-full max-w-md p-4 space-y-3 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <Siren className="w-5 h-5 text-destructive" />
+              <p className="text-lg font-bold">{t('smmSosTitle')}</p>
+            </div>
+            <p className="text-xs text-muted-foreground">{t('smmSosHint')}</p>
+            {requests.filter(r => r.status === 'accepted').length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {requests.filter(r => r.status === 'accepted').map(r => {
+                  const val = `${r.kind}:${r.id}`;
+                  const active = sosDeal === val;
+                  return (
+                    <button key={r.id} onClick={() => setSosDeal(active ? '' : val)}
+                      className={`shrink-0 max-w-[220px] rounded-full border px-3 py-1.5 text-xs font-bold truncate ${active ? 'bg-destructive text-white border-destructive' : 'border-black/20 bg-white text-black/70'}`}>
+                      {r.eventTitle}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <Textarea value={sosReason} onChange={e => setSosReason(e.target.value)} maxLength={1000}
+              placeholder={t('smmSosReason')} className="rounded-2xl border-black/20 bg-white min-h-20" />
+            <div className="flex gap-2">
+              <Button onClick={sendSos} disabled={sosSending || !sosReason.trim()} className="flex-1 h-9 rounded-full bg-destructive hover:bg-destructive/90 text-white">
+                {sosSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Siren className="w-4 h-4" />} {t('smmSosSend')}
+              </Button>
+              <Button variant="outline" onClick={() => setSosOpen(false)} className="h-9 rounded-full border-black/30">{t('cancel')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* «Обсудить с ИИ» — the SAME panel the test cards open, docked to the
       right edge on desktop exactly like the dashboard's AI window in app-root */}
       <div className={aiOpen ? 'fixed inset-0 z-50 flex items-center justify-end lg:p-5 pointer-events-none' : 'contents'}>

@@ -764,6 +764,8 @@ export function RequestRow({
   // ЗАЯВКА БЕЗ ТЕСТА: the ad link IS the заявка's substance — the customer
   // must see it right in the row (it also lands in the direct chat)
   proofUrl,
+  // ACCEPTED deal → the chat page (the work talk lives there)
+  onOpenChat,
 }: {
   kindLabel: string; title: string; sub: string; status: string;
   score?: string; onWithdraw?: () => void; withdrawLabel: string;
@@ -771,6 +773,7 @@ export function RequestRow({
   onComplete?: () => void; onReview?: () => void; reviewed?: boolean;
   confirmations?: number; myConfirmDone?: boolean; t: CardCtx['t'];
   proofUrl?: string | null;
+  onOpenChat?: () => void;
 }) {
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
@@ -811,6 +814,11 @@ export function RequestRow({
         {status === 'pending' && onWithdraw && !canDecide && (
           <Button size="sm" variant="outline" onClick={onWithdraw} className="h-8 rounded-full border-destructive/50 text-destructive text-xs shrink-0">
             {withdrawLabel}
+          </Button>
+        )}
+        {status === 'accepted' && onOpenChat && (
+          <Button size="sm" onClick={onOpenChat} className="h-8 rounded-full text-xs px-3 shrink-0">
+            <MessageCircle className="w-3.5 h-3.5" /> {t('smmRequestsChat')}
           </Button>
         )}
         {status === 'accepted' && onComplete && !myConfirmDone && (
