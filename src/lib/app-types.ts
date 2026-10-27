@@ -359,10 +359,11 @@ export interface SmmChecklistItemT {
   updatedAt: string;
 }
 
-// СОС-тикет in the админ-панель
+// СОС-тикет in the админ-панель (kind: "sos" | "deal-complete" | "deal-cancel")
 export interface SmmTicketT {
   id: string;
   status: 'open' | 'accepted' | 'closed';
+  kind?: string;
   eventTitle: string;
   peerNames: string;
   reason: string;
@@ -373,6 +374,39 @@ export interface SmmTicketT {
   createdByName: string;
   adminName: string;
   createdAt: string;
+}
+
+// ── CHAT META — the live deal state a direct chat renders (see getChatMeta):
+// the invitations the chat's ПРИГЛАШЕНИЕ#<id> messages bind their buttons to,
+// the active deal (the finish/cancel bar) and the pending admin request.
+export interface SmmChatInvitationT {
+  id: string;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled' | 'completed' | string;
+  estimate: number | null;
+  eventId: string;
+  eventTitle: string;
+  eventFormat?: string;
+  roleId: string;
+  roleName: string;
+  customerId: string;
+  specialistId: string;
+  createdAt?: string;
+}
+
+export interface SmmChatDealT {
+  dealType: 'application' | 'invitation';
+  dealId: string;
+  status: string;
+  completedByCustomer: boolean;
+  completedBySpecialist: boolean;
+  eventTitle: string;
+  roleName: string;
+}
+
+export interface SmmChatMetaT {
+  invitations: SmmChatInvitationT[];
+  deal: SmmChatDealT | null;
+  adminTicket: { id: string; kind: string; status: string } | null;
 }
 
 export interface SmmAdminDataT {

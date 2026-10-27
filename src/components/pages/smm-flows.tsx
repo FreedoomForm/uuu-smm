@@ -188,6 +188,14 @@ export function SmmInviteView() {
   const setPage = useNavStore(s => s.setPage);
   const inviteCtx = useSmmStore(s => s.inviteCtx);
   const [sending, setSending] = useState(false);
+  // «Выбрать другую роль» mode: the chat's cancel flow lands here with the
+  // specialist's role CHIPS and no pre-picked role — confirm waits for a pick.
+  const [pickedRoleId, setPickedRoleId] = useState<string | null>(inviteCtx?.roleId || null);
+  const roleChips = inviteCtx?.roles && inviteCtx.roles.length > 1 ? inviteCtx.roles : null;
+  const pickedRole = roleChips?.find(r => r.id === pickedRoleId) || null;
+  const estimate = pickedRole
+    ? (inviteCtx!.eventFormat === 'online' ? pickedRole.pricePerK : pickedRole.pricePerDay)
+    : (inviteCtx ? (inviteCtx.eventFormat === 'online' ? inviteCtx.pricePerK : inviteCtx.pricePerDay) : null);
 
   const back = () => {
     useSmmStore.setState({ inviteCtx: null });
@@ -203,15 +211,14 @@ export function SmmInviteView() {
     );
   }
 
-  const estimate = inviteCtx.eventFormat === 'online' ? inviteCtx.pricePerK : inviteCtx.pricePerDay;
-
   const confirm = async () => {
+    if (roleChips && !pickedRoleId) return;
     setSending(true);
     try {
       await api.createInvitation({
         specialistId: inviteCtx.specialistId,
         eventId: inviteCtx.eventId,
-        roleId: inviteCtx.roleId,
+        roleId: pickedRoleId || inviteCtx.roleId,
         estimate,
       });
       window.dispatchEvent(new CustomEvent('smm-toast', { detail: t('smmInviteSent') }));
@@ -226,20 +233,35 @@ export function SmmInviteView() {
 
   return (
     <EditorShell title={t('smmInviteTitle')} onBack={back} lang={lang} cycleLang={cycleLang}
-      saveLabel={t('smmInviteConfirm')} onSave={confirm} saving={sending} saveDisabled={sending}>
+      saveLabel={t('smmInviteConfirm')} onSave={confirm} saving={sending} saveDisabled={sending || (roleChips ? !pickedRoleId : !inviteCtx.roleId)}>
+      {/* THE ROLE CHIPS («Выбрать другую роль»): switch the role the estimate
+      is computed for — the confirm sends the picked role */}
+      {roleChips && (
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-bold text-muted-foreground uppercase">{t('smmInvitePickRole')}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {roleChips.map(r => (
+              <button key={r.id} type="button" onClick={() => setPickedRoleId(r.id)}
+                className={`rounded-full border-2 px-3 py-1.5 text-xs font-semibold transition-colors ${pickedRoleId === r.id ? 'bg-cta text-white border-cta' : 'border-black bg-white hover:bg-muted/50'}`}>
+                {r.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {/* the chosen ROLE card (created by the specialist) */}
       <Card className="rounded-4xl border border-black bg-white overflow-hidden">
         <div className="h-2 bg-[#FFE3D6]" />
         <CardContent className="p-4">
           <p className="text-[11px] font-bold text-muted-foreground uppercase">{t('smmPostRole')}</p>
-          <p className="text-lg font-bold">{inviteCtx.roleName}</p>
+          <p className="text-lg font-bold">{pickedRole ? pickedRole.name : inviteCtx.roleName || '—'}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{inviteCtx.specialistName}</p>
           <div className="flex flex-col gap-1 mt-2 text-xs">
-            {inviteCtx.pricePerK != null && (
-              <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-amber-500" /> {t('smmEstimateOnline')}: {fmtMoney(inviteCtx.pricePerK)}</p>
+            {(pickedRole ? pickedRole.pricePerK : inviteCtx.pricePerK) != null && (
+              <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-amber-500" /> {t('smmEstimateOnline')}: {fmtMoney((pickedRole ? pickedRole.pricePerK : inviteCtx.pricePerK) as number)}</p>
             )}
-            {inviteCtx.pricePerDay != null && (
-              <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-amber-500" /> {t('smmEstimateOffline')}: {fmtMoney(inviteCtx.pricePerDay)}</p>
+            {(pickedRole ? pickedRole.pricePerDay : inviteCtx.pricePerDay) != null && (
+              <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-amber-500" /> {t('smmEstimateOffline')}: {fmtMoney((pickedRole ? pickedRole.pricePerDay : inviteCtx.pricePerDay) as number)}</p>
             )}
           </div>
         </CardContent>

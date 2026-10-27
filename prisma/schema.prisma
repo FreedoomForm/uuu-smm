@@ -482,6 +482,9 @@ model SmmSupportTicket {
   id          String   @id @default(cuid())
   createdById String
   createdBy   User     @relation("SmmTicketAuthor", fields: [createdById], references: [id], onDelete: Cascade)
+  // "sos" = the free support signal, "deal-complete" / "deal-cancel" = a deal
+  // party's request the admin must confirm or reject (the chat-page buttons)
+  kind        String   @default("sos")
   // The direct chat the admin joins (customer ↔ specialist of the deal)
   chatId      String
   // The deal the СОС is about (polymorphic, the same pair SmmReview keeps)

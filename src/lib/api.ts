@@ -286,8 +286,17 @@ export const api = {
 
   // REAL-TIME CHAT — the long-poll: the request is held on the server until
   // new messages exist (≤25s), the client re-opens it after every answer.
+  // Every wake carries the chat's deal META (invitations/deal/admin request)
+  // so the chat UI re-renders its buttons instantly, no reload anywhere.
   pollChatMessages: (id: string, after?: string) =>
-    apiFetch(`/smm/chats/${id}/poll?wait=25000${after ? `&after=${encodeURIComponent(after)}` : ''}`) as Promise<{ messages: import('@/lib/app-types').SmmChatMessageT[] }>,
+    apiFetch(`/smm/chats/${id}/poll?wait=25000${after ? `&after=${encodeURIComponent(after)}` : ''}`) as Promise<{ messages: import('@/lib/app-types').SmmChatMessageT[]; meta?: import('@/lib/app-types').SmmChatMetaT }>,
+  // The live deal state of a direct chat — refetched after every button press
+  getChatDeal: (id: string) =>
+    apiFetch(`/smm/chats/${id}/deal`) as Promise<import('@/lib/app-types').SmmChatMetaT>,
+  // «Успешно закончить сделку» / «Отменить сделку» — the request lands in the
+  // admins' library; the deal changes only after the admin confirms it
+  requestDealAction: (dealType: 'application' | 'invitation', dealId: string, action: 'complete' | 'cancel') =>
+    apiFetch('/smm/deal-request', { method: 'POST', body: JSON.stringify({ dealType, dealId, action }) }) as Promise<{ id: string; kind: string; status: string }>,
 
   // ЧЕК-ЛИСТ file upload — the SAME attachment pipeline the tests keep
   // (FormData must not carry the JSON Content-Type → raw fetch)
@@ -318,7 +327,7 @@ export const api = {
   // The admin's ticket libraries: pool (public, all admins) + mine (personal)
   getTicketPool: () =>
     apiFetch('/smm/sos/pool') as Promise<import('@/lib/app-types').SmmTicketPoolT>,
-  adminTicketAction: (id: string, action: 'accept' | 'close') =>
+  adminTicketAction: (id: string, action: 'accept' | 'close' | 'confirm' | 'reject') =>
     apiFetch(`/smm/sos/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }) as Promise<{ id: string; status: string }>,
   adminSetBlocked: (id: string, blocked: boolean) =>
     apiFetch(`/smm/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ blocked }) }) as Promise<{ id: string; isBlocked: boolean }>,
@@ -333,7 +342,7 @@ export const api = {
   // Сделка (Mercur deal lifecycle): decisions, both-side completion, reviews
   decideApplication: (id: string, decision: 'accepted' | 'declined') =>
     apiFetch(`/smm/applications/${id}`, { method: 'PATCH', body: JSON.stringify({ decision }) }),
-  decideInvitation: (id: string, decision: 'accepted' | 'declined') =>
+  decideInvitation: (id: string, decision: 'accepted' | 'declined' | 'cancelled') =>
     apiFetch(`/smm/invitations/${id}`, { method: 'PATCH', body: JSON.stringify({ decision }) }),
   completeDeal: (dealType: 'application' | 'invitation', dealId: string) =>
     apiFetch('/smm/deals/complete', { method: 'POST', body: JSON.stringify({ dealType, dealId }) }),
@@ -359,7 +368,7 @@ export const api = {
     apiFetch(`/smm/chats/${id}`, { method: 'PUT', body: JSON.stringify({ title }) }),
   deleteSmmChat: (id: string) => apiFetch(`/smm/chats/${id}`, { method: 'DELETE' }),
   getSmmChatMessages: (id: string, after?: string) =>
-    apiFetch(`/smm/chats/${id}/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`) as Promise<{ messages: import('@/lib/app-types').SmmChatMessageT[] }>,
+    apiFetch(`/smm/chats/${id}/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`) as Promise<{ messages: import('@/lib/app-types').SmmChatMessageT[]; meta?: import('@/lib/app-types').SmmChatMetaT }>,
   sendSmmChatMessage: (id: string, text: string) =>
     apiFetch(`/smm/chats/${id}/messages`, { method: 'POST', body: JSON.stringify({ text }) }) as Promise<import('@/lib/app-types').SmmChatMessageT>,
 

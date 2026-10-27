@@ -45,7 +45,10 @@ export interface SmmApplyCtx {
   testIds: string[];
 }
 
-// The invitation payload the customer confirms on the estimate screen
+// The invitation payload the customer confirms on the estimate screen.
+// `roles` is set by the chat's «Выбрать другую роль» flow: the estimate
+// screen then shows the specialist's role chips (roleId null → none picked
+// yet, confirm waits for a pick).
 export interface SmmInviteCtx {
   specialistId: string;
   specialistName: string;
@@ -57,6 +60,7 @@ export interface SmmInviteCtx {
   pricePerDay: number | null;
   eventFormat: 'online' | 'offline';
   estimate: number | null;
+  roles?: { id: string; name: string; pricePerK: number | null; pricePerDay: number | null }[];
 }
 
 // The direct dialog the FULLSCREEN chat window shows (topWindow === 'chat'):

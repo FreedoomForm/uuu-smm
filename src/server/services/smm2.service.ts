@@ -807,11 +807,13 @@ export async function createInvitation(
   });
   const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
   const chat = await directChatBetween(userId, body.specialistId);
+  // The message carries the invitation id (ПРИГЛАШЕНИЕ#<id>) — the chat UI
+  // binds the ACCEPT/DECLINE/CANCEL buttons to THIS invitation through it.
   await postSystemMessage(
     chat.id,
     userId,
     me?.name || userName,
-    `ПРИГЛАШЕНИЕ · «${event.title}» · роль «${role.name}»${inv.estimate != null ? ` · примерная сумма: ${inv.estimate}` : ""}`
+    `ПРИГЛАШЕНИЕ#${inv.id} · «${event.title}» · роль «${role.name}»${inv.estimate != null ? ` · примерная сумма: ${inv.estimate}` : ""}`
   );
   return inv;
 }
@@ -900,14 +902,23 @@ export async function decideApplication(userId: string, id: string, decision: st
 
 /** The specialist decides an incoming приглашение (accept = the deal starts). */
 export async function decideInvitation(userId: string, id: string, decision: string) {
-  if (decision !== "accepted" && decision !== "declined") throw ApiError.badRequest("decision must be accepted or declined");
+  if (decision !== "accepted" && decision !== "declined" && decision !== "cancelled") throw ApiError.badRequest("decision must be accepted, declined or cancelled");
   const inv = await db.smmInvitation.findUnique({
     where: { id },
     include: { event: { select: { id: true, title: true } }, role: { select: { name: true } } },
   });
   if (!inv) throw ApiError.notFound("Invitation not found");
-  // The invited specialist decides — OR the platform ADMIN (СОС bypass).
   const me = await db.user.findUnique({ where: { id: userId }, select: { name: true, isAdmin: true } });
+  // THE CUSTOMER'S CANCEL (the chat «Отменить» button): own pending invitation only.
+  if (decision === "cancelled") {
+    if (inv.customerId !== userId) throw ApiError.forbidden("Only the inviting customer can cancel");
+    if (inv.status !== "pending") throw ApiError.conflict("Already decided");
+    const cancelled = await db.smmInvitation.update({ where: { id }, data: { status: "cancelled" } });
+    const chat = await directChatBetween(inv.customerId, inv.specialistId);
+    await postSystemMessage(chat.id, userId, me?.name || "", `ПРИГЛАШЕНИЕ ОТМЕНЕНО ЗАКАЗЧИКОМ · «${inv.event.title}» · роль «${inv.role.name}»`);
+    return cancelled;
+  }
+  // The invited specialist decides — OR the platform ADMIN (СОС bypass).
   const adminOverride = !!me?.isAdmin && inv.specialistId !== userId;
   if (inv.specialistId !== userId && !adminOverride) throw ApiError.forbidden("Only the invited specialist can decide");
   if (inv.status !== "pending") throw ApiError.conflict("Already decided");
@@ -1313,7 +1324,7 @@ export async function listChatMessages(userId: string, chatId: string, after?: s
     orderBy: { createdAt: "asc" },
     take: 300,
   });
-  return { messages };
+  return { messages, meta: await getChatMeta(userId, chatId) };
 }
 
 export async function sendChatMessage(userId: string, chatId: string, text: string) {
@@ -1620,6 +1631,202 @@ async function requireAdmin(userId: string) {
   if (!me?.isAdmin) throw ApiError.forbidden("Admins only");
 }
 
+// ── CHAT META — the deal state of a direct chat (customer ↔ specialist):
+// the invitations the chat's messages reference (their live statuses drive
+// the chat card's buttons), the ACTIVE deal (drives the finish/cancel bar)
+// and the pending admin request for that deal. Rides with every messages /
+// poll / deal response so both sides see every change instantly.
+export async function getChatMeta(userId: string, chatId: string) {
+  const chat = await db.smmChat.findUnique({ where: { id: chatId } });
+  if (!chat) throw ApiError.notFound("Chat not found");
+  if (chat.aId !== userId && chat.bId !== userId) throw ApiError.forbidden("Not your chat");
+  const peerId = (chat.aId === userId ? chat.bId : chat.aId) || "";
+  if (!peerId) return { invitations: [], deal: null, adminTicket: null };
+  const pair = { OR: [
+    { customerId: userId, specialistId: peerId },
+    { customerId: peerId, specialistId: userId },
+  ] };
+  const [invs, apps] = await Promise.all([
+    db.smmInvitation.findMany({
+      where: pair, orderBy: { createdAt: "desc" }, take: 8,
+      include: { event: { select: { id: true, title: true, format: true } }, role: { select: { id: true, name: true } } },
+    }),
+    db.smmApplication.findMany({
+      where: { OR: [
+        { specialistId: userId, event: { customerId: peerId } },
+        { specialistId: peerId, event: { customerId: userId } },
+      ] }, orderBy: { createdAt: "desc" }, take: 5,
+      include: { event: { select: { title: true, customerId: true } }, role: { select: { name: true } } },
+    }),
+  ]);
+  // THE ACTIVE DEAL: an accepted one first (the finish/cancel bar lives on
+  // it), then a pending one, else the most recent of either kind.
+  const invDeals = invs.map((i) => ({
+    dealType: "invitation" as const, dealId: i.id, status: i.status,
+    completedByCustomer: i.completedByCustomer, completedBySpecialist: i.completedBySpecialist,
+    eventTitle: i.event.title, roleName: i.role.name, createdAt: i.createdAt,
+  }));
+  const appDeals = apps.map((a) => ({
+    dealType: "application" as const, dealId: a.id, status: a.status,
+    completedByCustomer: a.completedByCustomer, completedBySpecialist: a.completedBySpecialist,
+    eventTitle: a.event.title, roleName: a.role.name, createdAt: a.createdAt,
+  }));
+  const all = [...invDeals, ...appDeals].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  const deal = all.find((d) => d.status === "accepted") || all.find((d) => d.status === "pending") || all[0] || null;
+  const adminTicket = deal
+    ? await db.smmSupportTicket.findFirst({
+        where: { dealType: deal.dealType, dealId: deal.dealId, status: { in: ["open", "accepted"] }, kind: { in: ["deal-complete", "deal-cancel"] } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, kind: true, status: true },
+      })
+    : null;
+  return {
+    invitations: invs.map((i) => ({
+      id: i.id, status: i.status, estimate: i.estimate,
+      eventId: i.event.id, eventTitle: i.event.title, eventFormat: i.event.format,
+      roleId: i.role.id, roleName: i.role.name,
+      customerId: i.customerId, specialistId: i.specialistId,
+      createdAt: i.createdAt,
+    })),
+    deal: deal ? {
+      dealType: deal.dealType, dealId: deal.dealId, status: deal.status,
+      completedByCustomer: deal.completedByCustomer, completedBySpecialist: deal.completedBySpecialist,
+      eventTitle: deal.eventTitle, roleName: deal.roleName,
+    } : null,
+    adminTicket: adminTicket ? { id: adminTicket.id, kind: adminTicket.kind, status: adminTicket.status } : null,
+  };
+}
+
+// ── DEAL REQUEST TO THE ADMIN — either deal party presses «Успешно закончить
+// сделку» or «Отменить сделку» in the chat: the action does NOT happen on
+// its own — a ticket lands in the admins' ПУБЛИЧНАЯ библиотека, an admin
+// checks the chat and CONFIRMS (applies the action) or REJECTS it.
+export async function requestDealAction(
+  userId: string,
+  body: { dealType?: string; dealId?: string; action?: string }
+) {
+  const dealType = String(body.dealType || "");
+  const dealId = String(body.dealId || "");
+  const action = String(body.action || "");
+  if (dealType !== "application" && dealType !== "invitation") throw ApiError.badRequest("dealType must be application or invitation");
+  if (action !== "complete" && action !== "cancel") throw ApiError.badRequest("action must be complete or cancel");
+  // membership: only the deal's own parties request (the admin decides via
+  // the ticket, not by requesting)
+  const { event, specialistId, customerId } = await dealForChecklist(userId, dealType, dealId);
+  if (userId !== specialistId && userId !== customerId) throw ApiError.forbidden("Not your deal");
+  const deal = dealType === "application"
+    ? await db.smmApplication.findUnique({ where: { id: dealId } })
+    : await db.smmInvitation.findUnique({ where: { id: dealId } });
+  if (!deal) throw ApiError.notFound("Deal not found");
+  if (deal.status !== "accepted") throw ApiError.conflict("Deal is not active");
+  const dup = await db.smmSupportTicket.findFirst({
+    where: { dealType, dealId, status: { in: ["open", "accepted"] }, kind: { in: ["deal-complete", "deal-cancel"] } },
+    select: { id: true },
+  });
+  if (dup) throw ApiError.conflict("A request for this deal is already pending");
+  const chat = await directChatBetween(specialistId, customerId);
+  const [cust, spec] = await Promise.all([
+    db.user.findUnique({ where: { id: customerId }, select: { name: true } }),
+    db.user.findUnique({ where: { id: specialistId }, select: { name: true } }),
+  ]);
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const ticket = await db.smmSupportTicket.create({
+    data: {
+      createdById: userId, chatId: chat.id, dealType, dealId,
+      eventTitle: event.title, peerNames: `${cust?.name || "?"} ⇄ ${spec?.name || "?"}`,
+      reason: "", kind: action === "complete" ? "deal-complete" : "deal-cancel",
+    },
+  });
+  await postSystemMessage(
+    chat.id, userId, me?.name || "",
+    action === "complete"
+      ? `ЗАПРОС АДМИНУ · ${me?.name || "?"} просит УСПЕШНО ЗАВЕРШИТЬ сделку · «${event.title}»`
+      : `ЗАПРОС АДМИНУ · ${me?.name || "?"} просит ОТМЕНИТЬ сделку · «${event.title}»`
+  );
+  await telegramNotify(`⚖️ Запрос админу (${action === "complete" ? "завершить" : "отменить"}): «${event.title}» · от ${me?.name || "?"}`);
+  return ticket;
+}
+
+/** Admin CONFIRMS or REJECTS a deal action request (ticket kinds
+ * deal-complete / deal-cancel): confirm applies the action to the deal
+ * (completed with the auto post / declined), reject leaves the deal alive.
+ * Both outcomes post a system message into the deal chat — the parties'
+ * polls wake and their chats re-render instantly. */
+export async function adminDecideDealRequest(userId: string, id: string, decision: "confirm" | "reject") {
+  await requireAdmin(userId);
+  const ticket = await db.smmSupportTicket.findUnique({ where: { id } });
+  if (!ticket) throw ApiError.notFound("Ticket not found");
+  if (ticket.kind !== "deal-complete" && ticket.kind !== "deal-cancel") throw ApiError.badRequest("Not a deal request");
+  if (ticket.status === "closed") throw ApiError.conflict("Ticket closed");
+  if (ticket.status === "open") throw ApiError.conflict("Accept the request first");
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const closeTicket = () => db.smmSupportTicket.update({
+    where: { id: ticket.id }, data: { status: "closed", adminId: ticket.adminId || userId, closedAt: new Date() },
+  });
+  if (decision === "reject") {
+    await closeTicket();
+    await postSystemMessage(ticket.chatId, userId, me?.name || "", `АДМИН отклонил запрос — сделка продолжается · «${ticket.eventTitle}»`).catch(() => {});
+    return { ...ticket, status: "closed" };
+  }
+  // CONFIRM: apply the requested action to the deal.
+  if (ticket.dealType === "application") {
+    const app = await db.smmApplication.findUnique({
+      where: { id: ticket.dealId },
+      include: { event: { select: { title: true } }, role: { select: { name: true, id: true } } },
+    });
+    if (!app) throw ApiError.notFound("Deal not found");
+    if (ticket.kind === "deal-complete") {
+      if (app.status !== "accepted") throw ApiError.conflict("Deal is not active");
+      await db.smmApplication.update({
+        where: { id: app.id },
+        data: { completedByCustomer: true, completedBySpecialist: true, status: "completed", completedAt: new Date() },
+      });
+      await closeTicket();
+      await postSystemMessage(ticket.chatId, userId, me?.name || "", `АДМИН подтвердил: СДЕЛКА УСПЕШНО ЗАВЕРШЕНА · «${app.event.title}» · роль «${app.role.name}» · в личной библиотеке специалиста создан автопост · можно оставить отзыв`);
+      await telegramNotify(`✅ Админ завершил сделку: «${app.event.title}» · роль «${app.role.name}»`);
+      try {
+        await ensureDealPost({
+          specialistId: app.specialistId, roleId: app.roleId, eventTitle: app.event.title,
+          proofUrl: app.proofUrl || undefined, proofNote: app.proofNote || undefined, via: "application",
+        });
+      } catch { /* the deal stays completed even if the auto post fails */ }
+      return { ...ticket, status: "closed" };
+    }
+    // deal-cancel
+    if (app.status !== "accepted") throw ApiError.conflict("Deal is not active");
+    await db.smmApplication.update({ where: { id: app.id }, data: { status: "declined" } });
+    await closeTicket();
+    await postSystemMessage(ticket.chatId, userId, me?.name || "", `АДМИН подтвердил: СДЕЛКА ОТМЕНЕНА · «${app.event.title}» · роль «${app.role.name}»`);
+    await telegramNotify(`🚫 Админ отменил сделку: «${app.event.title}» · роль «${app.role.name}»`);
+    return { ...ticket, status: "closed" };
+  }
+  const inv = await db.smmInvitation.findUnique({
+    where: { id: ticket.dealId },
+    include: { event: { select: { title: true } }, role: { select: { name: true, id: true } } },
+  });
+  if (!inv) throw ApiError.notFound("Deal not found");
+  if (ticket.kind === "deal-complete") {
+    if (inv.status !== "accepted") throw ApiError.conflict("Deal is not active");
+    await db.smmInvitation.update({
+      where: { id: inv.id },
+      data: { completedByCustomer: true, completedBySpecialist: true, status: "completed", completedAt: new Date() },
+    });
+    await closeTicket();
+    await postSystemMessage(ticket.chatId, userId, me?.name || "", `АДМИН подтвердил: СДЕЛКА УСПЕШНО ЗАВЕРШЕНА · «${inv.event.title}» · роль «${inv.role.name}» · в личной библиотеке специалиста создан автопост · можно оставить отзыв`);
+    await telegramNotify(`✅ Админ завершил сделку: «${inv.event.title}» · роль «${inv.role.name}»`);
+    try {
+      await ensureDealPost({ specialistId: inv.specialistId, roleId: inv.roleId, eventTitle: inv.event.title, via: "invitation" });
+    } catch { /* the deal stays completed even if the auto post fails */ }
+    return { ...ticket, status: "closed" };
+  }
+  if (inv.status !== "accepted") throw ApiError.conflict("Deal is not active");
+  await db.smmInvitation.update({ where: { id: inv.id }, data: { status: "declined" } });
+  await closeTicket();
+  await postSystemMessage(ticket.chatId, userId, me?.name || "", `АДМИН подтвердил: СДЕЛКА ОТМЕНЕНА · «${inv.event.title}» · роль «${inv.role.name}»`);
+  await telegramNotify(`🚫 Админ отменил сделку: «${inv.event.title}» · роль «${inv.role.name}»`);
+  return { ...ticket, status: "closed" };
+}
+
 /** Admin: all tickets (newest first) + the users list for the block panel. */
 export async function listAdminData(userId: string) {
   await requireAdmin(userId);
@@ -1637,6 +1844,7 @@ export async function listAdminData(userId: string) {
     tickets: tickets.map((t) => ({
       id: t.id,
       status: t.status,
+      kind: t.kind,
       eventTitle: t.eventTitle,
       peerNames: t.peerNames,
       reason: t.reason,
@@ -1666,6 +1874,7 @@ export async function listTicketPool(userId: string) {
   const map = (t: typeof pool[number]) => ({
     id: t.id,
     status: t.status as "open" | "accepted" | "closed",
+    kind: (t as any).kind as string | undefined,
     eventTitle: t.eventTitle,
     peerNames: t.peerNames,
     reason: t.reason,
@@ -1680,9 +1889,12 @@ export async function listTicketPool(userId: string) {
   return { pool: pool.map(map), mine: mine.map(map) };
 }
 
-/** Admin accepts a ticket (enters the chat) or closes it. */
+/** Admin accepts a ticket (enters the chat) or closes it. For the DEAL
+ * REQUEST kinds (deal-complete / deal-cancel) the decision actions are
+ * «confirm» (apply the requested action) / «reject» (leave the deal alive). */
 export async function adminTicketAction(userId: string, id: string, action: string) {
   await requireAdmin(userId);
+  if (action === "confirm" || action === "reject") return adminDecideDealRequest(userId, id, action);
   const ticket = await db.smmSupportTicket.findUnique({ where: { id } });
   if (!ticket) throw ApiError.notFound("Ticket not found");
   if (action === "accept") {
@@ -1750,5 +1962,9 @@ export async function pollChatMessages(userId: string, chatId: string, after: st
       take: 300,
     });
   }
-  return { messages };
+  // META rides along on every wake: every deal action (invite decision, deal
+  // request, admin confirm) posts a system message → the peer's poll wakes →
+  // the fresh invitations/deal state travels in the SAME response — the chat
+  // UI re-renders its buttons instantly, no page reload anywhere.
+  return { messages, meta: messages.length ? await getChatMeta(userId, chatId) : undefined };
 }

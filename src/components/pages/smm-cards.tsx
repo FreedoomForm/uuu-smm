@@ -797,7 +797,8 @@ export function RequestRow({
             {status === 'pending' ? t('smmStatusPending')
               : status === 'accepted' ? t('smmDealActive')
               : status === 'completed' ? t('smmStatusCompleted')
-              : status === 'declined' ? t('smmStatusDeclined') : status}
+              : status === 'declined' ? t('smmStatusDeclined')
+              : status === 'cancelled' ? t('smmStatusCancelled') : status}
           </Badge>
           {score && <Badge variant="secondary" className="rounded-full text-[10px]">{score}</Badge>}
           {status === 'accepted' && typeof confirmations === 'number' && (
