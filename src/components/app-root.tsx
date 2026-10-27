@@ -1373,7 +1373,7 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
       // role on signup, or the role persisted in the DB on login. No switcher.
       useSmmStore.setState({
         smmMode: result?.smmRole === 'specialist' ? 'specialist' : 'customer',
-        topWindow: 'none', editMode: false, activeCardId: null,
+        topWindow: 'none', activeCardId: null,
       });
       // The login/register response already set the httpOnly session cookie
       // (DB-backed) — the next visit pre-renders the dashboard shell.

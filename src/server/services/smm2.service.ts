@@ -289,6 +289,21 @@ function eventTests(testIds: string[]) {
     : Promise.resolve([]);
 }
 
+// PERF: batch the qualification tests of MANY events into ONE query — the
+// old per-event `eventTests` loop fired up to 100 DB roundtrips per list
+// load (seconds on a serverless Postgres), now it is exactly 1.
+async function eventsWithTests<T extends { testIds: string[] }>(rows: T[]) {
+  const allIds = [...new Set(rows.flatMap((e) => e.testIds || []))];
+  const tests = allIds.length
+    ? await db.test.findMany({
+        where: { id: { in: allIds } },
+        select: { id: true, title: true, _count: { select: { questions: true } } },
+      })
+    : [];
+  const byId = new Map(tests.map((t) => [t.id, t] as const));
+  return rows.map((e) => ({ ...e, tests: (e.testIds || []).map((id) => byId.get(id)).filter(Boolean) }));
+}
+
 export async function listEvents(userId: string, scope: string) {
   const mine = scope !== "public";
   const rows = await db.smmEvent.findMany({
@@ -297,10 +312,7 @@ export async function listEvents(userId: string, scope: string) {
     take: 100,
     include: eventInclude,
   });
-  const withTests = await Promise.all(
-    rows.map(async (e) => ({ ...e, tests: await eventTests(e.testIds) }))
-  );
-  return { items: withTests };
+  return { items: await eventsWithTests(rows) };
 }
 
 export async function getEvent(id: string) {
@@ -585,9 +597,7 @@ export async function getSmmProfile(viewerId: string, targetUserId: string) {
       include: eventInclude,
     }),
   ]);
-  const withTests = await Promise.all(
-    events.map(async (e) => ({ ...e, tests: await eventTests(e.testIds) }))
-  );
+  const withTests = await eventsWithTests(events);
   // Отзывы (Mercur model): the real average + the recent ones for the window
   const [rAgg, rRows] = await Promise.all([
     db.smmReview.aggregate({ where: { targetId: targetUserId }, _avg: { rating: true }, _count: { _all: true } }),
@@ -1340,10 +1350,17 @@ async function assertCardScope(scopeType: string, scopeId: string) {
   }
 }
 
-export async function listCardChat(userId: string, scopeType: string, scopeId: string) {
+export async function listCardChat(userId: string, scopeType: string, scopeId: string, after?: string) {
   await assertCardScope(scopeType, scopeId);
   const messages = await db.smmChatMessage.findMany({
-    where: { scopeType, scopeId },
+    where: {
+      scopeType,
+      scopeId,
+      // PERF incremental pull: the card-chat window polls every few seconds —
+      // with the `after` cursor only the NEW rows travel (the full history
+      // comes once, on the first open).
+      ...(after ? { createdAt: { gt: new Date(after) } } : {}),
+    },
     orderBy: { createdAt: "asc" },
     take: 300,
   });

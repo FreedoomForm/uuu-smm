@@ -2,7 +2,7 @@
 
 // ---------------------------------------------------------------------------
 // SMM store — the mode switcher state (the second bottom panel), the top-panel
-// window modes (закладки / чаты), the contextual edit mode and the payloads
+// window modes (закладки / чаты), and the payloads
 // of the two request flows (заявка специалиста / приглашение заказчика).
 // Session-scope only: a reload returns to the last saved DB mode (User.smmRole).
 // ---------------------------------------------------------------------------
@@ -83,8 +83,6 @@ interface SmmData {
   smmMode: SmmMode;
   // Main-window mode driven by the top-panel закладки/чат buttons
   topWindow: SmmTopWindow;
-  // Contextual edit mode (the «изменить» top-panel button)
-  editMode: boolean;
   // id of the card currently on screen (feed) / selected (grid) — drives the
   // contextual FIRST bottom bar (подать заявку / пригласить на мероприятие)
   activeCardId: string | null;
@@ -119,7 +117,6 @@ interface SmmData {
 const INITIAL: SmmData = {
   smmMode: 'specialist',
   topWindow: 'none',
-  editMode: false,
   activeCardId: null,
   pickedApplyRole: null,
   pickedInviteEvent: null,

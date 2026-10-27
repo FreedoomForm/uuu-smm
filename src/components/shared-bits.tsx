@@ -64,7 +64,7 @@ export function CreatorStrip({ name, creatorId, image, bookmarked, onToggleBookm
         className={`rounded-full overflow-hidden bg-cta text-white flex items-center justify-center font-extrabold ring-[3px] ring-white shadow-md shrink-0 ${compact ? 'w-8 h-8 text-sm' : 'w-11 h-11 sm:w-12 sm:h-12 text-base sm:text-lg'}`}
         title={name}
       >
-        {avatarSrc ? <img src={avatarSrc} alt="" className="w-full h-full object-cover" /> : initial}
+        {avatarSrc ? <img src={avatarSrc} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" /> : initial}
       </span>
       {identity}
       {/* Test title — parked between the author icon and the pin button

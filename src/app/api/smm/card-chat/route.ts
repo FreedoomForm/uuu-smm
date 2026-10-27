@@ -6,7 +6,7 @@ import { listCardChat, sendCardChat } from "@/server/services/smm2.service";
 
 export const GET = withApiAuth(async ({ userId, req }) => {
   const sp = req.nextUrl.searchParams;
-  return NextResponse.json(await listCardChat(userId, String(sp.get("scopeType") || ""), String(sp.get("scopeId") || "")));
+  return NextResponse.json(await listCardChat(userId, String(sp.get("scopeType") || ""), String(sp.get("scopeId") || ""), sp.get("after") || undefined));
 });
 
 export const POST = withApiAuth(async ({ userId, req }) => {

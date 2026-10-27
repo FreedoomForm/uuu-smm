@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // SMM DASHBOARD — the mode-switcher dashboard built on the tests site:
 //
-//   TOP PANEL  [＋ context] [Изменить] | [Поиск] [Закладки] [Чаты] [Вид] [Яз] [Профиль]
+//   TOP PANEL  [＋ context] | [Поиск] [Чек-лист] [СОС] [Закладки] [Чаты] [Вид] [Яз] [Профиль]
 //   MAIN       карточки (посты / мероприятия / специалисты) or the
 //              закладки / чаты / Мои запросы window
 //   BAR 1      контекстное действие (Подать заявку / Пригласить на мероприятие)
@@ -29,7 +29,7 @@ import { tUI } from '@/lib/i18n';
 import { CreatorStrip } from '@/components/shared-bits';
 import {
   ArrowLeft, Bot, ChevronDown, ChevronUp, Compass, Edit, Film, Library, LayoutGrid, Link2, Loader2, MessageCircle, MessageSquare,
-  Paperclip, Pencil, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList, ClipboardCheck, Siren, Shield, Upload,
+  Paperclip, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList, ClipboardCheck, Siren, Shield, Upload,
   Map as MapIcon,
 } from 'lucide-react';
 // Professional feed engine — the SAME Swiper setup the tests feed runs
@@ -64,7 +64,6 @@ import { useExitMount } from '@/components/motion';
 import { ResizableSheetFrame } from '@/components/resize-sheet';
 import { SheetHeaderSwitcher } from '@/components/sheet-switcher';
 import type { SheetOption } from '@/components/pages/take-test/sheet-config';
-import { SmmEventForm, SmmPostForm, type SmmFormHandle } from './smm-editors';
 
 // One AI conversation about one SMM card (persisted in localStorage — the
 // same deal the test dashboard's threads keep, but scoped to the SMM page)
@@ -83,6 +82,18 @@ import {
 import { fmtMoney, mediaSrc, SmmToast } from './smm-bits';
 
 type AnyItem = ({ kind: 'post' } & SmmPostT) | ({ kind: 'event' } & SmmEventT) | ({ kind: 'specialist' } & SmmSpecialistT) | ({ kind: 'ticket' } & SmmTicketT);
+
+// PERF — the dashboard list snapshot (see loadLists): one shared epoch-keyed
+// snapshot of the 6 list queries, <20s old snapshots re-apply with 0 network.
+interface ListSnapshot {
+  posts: { items: SmmPostT[] };
+  events: { items: SmmEventT[] };
+  specialists: { items: SmmSpecialistT[] };
+  evs: { items: SmmEventT[] };
+  bms: { items: import('@/lib/app-types').SmmBookmarkRowT[] };
+  roles: { items: { id: string; name: string }[] };
+}
+let listSnapshot: { key: string; at: number; data: ListSnapshot } | null = null;
 
 // ── THE СОС-ЗАПРОС CARD (the admin's ticket library) — the same card
 // anatomy the marketplace keeps, but the body is a support request: who
@@ -202,7 +213,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
 
   const smmMode = useSmmStore(s => s.smmMode);
   const topWindow = useSmmStore(s => s.topWindow);
-  const editMode = useSmmStore(s => s.editMode);
   const activeCardId = useSmmStore(s => s.activeCardId);
   const pickedApplyRole = useSmmStore(s => s.pickedApplyRole);
   const pickedInviteEvent = useSmmStore(s => s.pickedInviteEvent);
@@ -271,6 +281,8 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const [cardMessages, setCardMessages] = useState<import('@/lib/app-types').SmmChatMessageT[]>([]);
   const [cardInput, setCardInput] = useState('');
   const cardEndRef = useRef<HTMLDivElement | null>(null);
+  // the incremental cursor shared by the poll loop AND the send readback
+  const lastCardAfterRef = useRef<string>('');
   // The card windows stay mounted while their slide-down/fade exit animation
   // plays (the same deal the test windows keep) — the last target lives in a
   // ref so the panel doesn't blank out mid-exit.
@@ -283,17 +295,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   // The delete dialog («Удалить» on the card — the same confirm-first dialog
   // the test cards open before deleting)
   const [smmDelete, setSmmDelete] = useState<{ kind: 'event' | 'post' | 'specialist'; id: string; title: string } | null>(null);
-  // THE EDIT WINDOW («Изменить» on the card / in the window switcher — the
-  // SAME window the test cards open: a resizable sheet with the editor body
-  // inside + Save, NOT the full-page editor). Somebody else's card first
-  // becomes a private VERSION copy (the server-side copyEvent/copyPost).
-  const [editWin, setEditWin] = useState<{ kind: 'event' | 'post'; id: string; title: string } | null>(null);
-  const [editWinSaving, setEditWinSaving] = useState(false);
-  const editWinMounted = useExitMount(!!editWin, 200);
-  const editWinLast = useRef<{ kind: 'event' | 'post'; id: string; title: string } | null>(null);
-  useEffect(() => { if (editWin) editWinLast.current = editWin; }, [editWin]);
-  const editEventFormRef = useRef<SmmFormHandle>(null);
-  const editPostFormRef = useRef<SmmFormHandle>(null);
   // The files target per card (the switcher's «Файлы» option reuses the
   // target built at the card's «Файлы» click — the same cache the tests'
   // dashFilesCountRef keeps)
@@ -303,10 +304,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   // invite target even after the view changes to events/chats/etc.
   const lastSpRef = useRef<{ id: string; name: string; roles: SmmRoleT[] } | null>(null);
   // EVERY card ever rendered (dashboard feed/grid, profile window, bookmarks)
-  // lands here — «Изменить» must know own-vs-somebody's from ANY surface,
+  // lands here — the invite flow must know own-vs-somebody's from ANY surface,
   // not only from the current dashboard list (the profile-window cards are
-  // NOT in `items`; the old lookup failed there and an OWN card went through
-  // the copy path and errored — the button did not «always work»).
+  // NOT in `items`).
   const seenItemsRef = useRef<Record<string, AnyItem>>({});
 
   // ── «Обсудить с ИИ» window state (per-card threads in localStorage) ──
@@ -326,22 +326,56 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   // личная библиотека (mine) vs публичная (discover) — the first dock
   const personal = !discoverMode;
 
+  // PERF — the 6-request dashboard snapshot cache: switching Личная↔Публичная
+  // or reopening the закладки window re-applies the SAME data instantly
+  // (0 network) while it is <20s old. ANY mutation bumps refreshNonce, which
+  // changes the epoch key → the cache misses → everything refetches fresh.
+  const key = `${myId}:${refreshNonce}`;
+  const applyLists = useCallback((d: ListSnapshot) => {
+    setMyRoles(d.roles.items.map((r) => ({ id: r.id, name: r.name })));
+    setMyEvents(d.evs.items.map((e: any) => ({ id: e.id, title: e.title, format: e.format })));
+    setBookmarks(d.bms.items);
+    setSmmBookmarksSet(new Set(d.bms.items.map((b: any) => `${b.targetType}:${b.targetId}`)));
+    let list: AnyItem[] = [];
+    if (isSpecialist) {
+      list = personal
+        ? d.posts.items.map((p: any) => ({ ...p, kind: 'post' as const }))
+        : d.events.items.map((e: any) => ({ ...e, kind: 'event' as const }));
+    } else {
+      list = personal
+        ? d.evs.items.map((e: any) => ({ ...e, kind: 'event' as const }))
+        : d.specialists.items.map((s: any) => ({ ...s, kind: 'specialist' as const }));
+    }
+    setItems(list);
+  }, [isSpecialist, personal]);
+
   const loadLists = useCallback(async () => {
     if (!myId) return;
-    setListLoading(true);
-    try {
-      // THE ADMIN'S MARKETPLACE: the docks turn into the ticket libraries —
-      // the личная holds the requests THIS admin accepted, the публичная the
-      // shared pool of every OPEN request (the same list for all admins).
-      // The accepted ticket leaves the pool for EVERYONE (status !== open).
-      if (isAdminUser) {
+    // THE ADMIN'S MARKETPLACE: the docks turn into the ticket libraries —
+    // the личная holds the requests THIS admin accepted, the публичная the
+    // shared pool of every OPEN request (the same list for all admins).
+    // The accepted ticket leaves the pool for EVERYONE (status !== open).
+    // (Never cached: another admin can accept a ticket at any moment.)
+    if (isAdminUser) {
+      setListLoading(true);
+      try {
         const pool = await api.getTicketPool().catch(() => ({ pool: [] as SmmTicketT[], mine: [] as SmmTicketT[] }));
         setTicketPool(pool.pool || []);
         setTicketsMine(pool.mine || []);
         const src = personal ? (pool.mine || []) : (pool.pool || []);
         setItems((src as SmmTicketT[]).map(tk => ({ ...tk, kind: 'ticket' as const })));
-        return;
-      }
+      } finally { setListLoading(false); }
+      return;
+    }
+    // ── the cached fast path: same epoch, <20s old → 0 network
+    const snap = listSnapshot;
+    if (snap && snap.key === key && Date.now() - snap.at < 20000) {
+      applyLists(snap.data);
+      setListLoading(false);
+      return;
+    }
+    setListLoading(true);
+    try {
       const [posts, events, specialists, roles, evs, bms] = await Promise.all([
         api.getPosts('mine').catch(() => ({ items: [] })),
         api.getEvents('public').catch(() => ({ items: [] })),
@@ -350,25 +384,17 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
         api.getEvents('mine').catch(() => ({ items: [] })),
         api.getSmmBookmarks().catch(() => ({ items: [] })),
       ]);
-      setMyRoles((roles.items || []).map((r: any) => ({ id: r.id, name: r.name })));
-      setMyEvents((evs.items || []).map((e: any) => ({ id: e.id, title: e.title, format: e.format })));
-      setBookmarks(bms.items || []);
-      setSmmBookmarksSet(new Set((bms.items || []).map((b: any) => `${b.targetType}:${b.targetId}`)));
-      let list: AnyItem[] = [];
-      if (isSpecialist) {
-        list = personal
-          ? (posts.items || []).map((p: any) => ({ ...p, kind: 'post' as const }))
-          : (events.items || []).map((e: any) => ({ ...e, kind: 'event' as const }));
-      } else {
-        list = personal
-          ? (evs.items || []).map((e: any) => ({ ...e, kind: 'event' as const }))
-          : (specialists.items || []).map((s: any) => ({ ...s, kind: 'specialist' as const }));
-      }
-      setItems(list);
+      const data: ListSnapshot = {
+        posts: { items: posts.items || [] }, events: { items: events.items || [] },
+        specialists: { items: specialists.items || [] }, evs: { items: evs.items || [] }, bms: { items: bms.items || [] },
+        roles: { items: (roles.items || []).map((r: any) => ({ id: r.id, name: r.name })) },
+      };
+      listSnapshot = { key, at: Date.now(), data };
+      applyLists(data);
     } finally {
       setListLoading(false);
     }
-  }, [myId, isSpecialist, personal, isAdminUser]);
+  }, [myId, isSpecialist, personal, isAdminUser, key, applyLists]);
 
   useEffect(() => { void loadLists(); }, [loadLists, refreshNonce]);
 
@@ -586,18 +612,36 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [chatMessages.length, openChatId]);
 
-  // open the CARD's group chat messages + poll (the test-card «Чат» window)
+  // open the CARD's group chat messages + poll (the test-card «Чат» window).
+  // PERF: full history once, then every 4s poll carries the `after` cursor —
+  // only the NEW rows travel (the old full-refetch pulled the whole thread
+  // 15 times a minute).
   useEffect(() => {
-    if (!cardChat) { setCardMessages([]); return; }
+    if (!cardChat) { setCardMessages([]); lastCardAfterRef.current = ''; return; }
     let alive = true;
-    const fetchMsgs = async () => {
+    const fetchMsgs = async (after?: string) => {
       try {
-        const r = await api.getSmmCardChat(cardChat.kind, cardChat.id);
-        if (alive) setCardMessages(r.messages || []);
+        const r = await api.getSmmCardChat(cardChat.kind, cardChat.id, after);
+        if (!alive) return;
+        if (after) {
+          const fresh = (r.messages || []).filter(m => m.id);
+          if (fresh.length) {
+            setCardMessages(prev => {
+              const add = fresh.filter(m => !prev.some(p => p.id === m.id));
+              return add.length ? [...prev, ...add] : prev;
+            });
+            lastCardAfterRef.current = fresh[fresh.length - 1].createdAt;
+          }
+        } else {
+          setCardMessages(r.messages || []);
+          const lm = (r.messages || [])[(r.messages || []).length - 1];
+          lastCardAfterRef.current = lm?.createdAt || '';
+        }
       } catch { /* ignore */ }
     };
+    lastCardAfterRef.current = '';
     void fetchMsgs();
-    const iv = setInterval(fetchMsgs, 4000);
+    const iv = setInterval(() => void fetchMsgs(lastCardAfterRef.current || undefined), 4000);
     return () => { alive = false; clearInterval(iv); };
   }, [cardChat]);
 
@@ -611,8 +655,18 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     setCardInput('');
     try {
       await api.sendSmmCardChat(cardChat.kind, cardChat.id, text);
-      const r = await api.getSmmCardChat(cardChat.kind, cardChat.id);
-      setCardMessages(r.messages || []);
+      // optimistic-instant readback: pull ONLY what arrived after our last
+      // cursor (a full refetch here re-downloaded the whole thread per sent
+      // message)
+      const r = await api.getSmmCardChat(cardChat.kind, cardChat.id, lastCardAfterRef.current || undefined);
+      const fresh = r.messages || [];
+      if (fresh.length) {
+        setCardMessages(prev => {
+          const add = fresh.filter(m => !prev.some(p => p.id === m.id));
+          return add.length ? [...prev, ...add] : prev;
+        });
+        lastCardAfterRef.current = fresh[fresh.length - 1].createdAt;
+      }
     } catch { /* ignore */ }
   };
 
@@ -703,11 +757,10 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
 
   // ── «Обсудить с ИИ» — the SAME window the test cards open, fed by the
   // card's passport (/api/smm/ai-chat). One window at a time: the files /
-  // chat / edit windows yield (the same rule the test cards keep).
+  // chat windows yield (the same rule the test cards keep).
   const openSmmAi = (kind: 'event' | 'post' | 'specialist', id: string, title: string) => {
     const tid = `${kind}:${id}`;
     const th = aiThreads[tid];
-    setEditWin(null);
     useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
     setAiTarget({ kind, id, title });
     setAiMessages(th ? [...th.messages] : []);
@@ -785,21 +838,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       if (personal) { useSmmStore.setState({ editingId: null }); setPage('smm-event-editor'); }
       else useSmmStore.setState({ topWindow: 'requests' });
     }
-  };
-
-  const startEditActive = () => {
-    if (topWindow === 'files' || topWindow === 'card-chat') useSmmStore.setState({ topWindow: 'none', filesTarget: null, cardChat: null });
-    else if (topWindow !== 'none') return;
-    if (!activeItem) return;
-    // the SAME edit window the card's «Изменить» button opens (own → window;
-    // somebody else's → private version copy first, then the jump into the
-    // copier's own account/library)
-    void openEditWindow(
-      activeItem.kind,
-      activeItem.id,
-      activeItem.kind === 'event' ? activeItem.title : activeItem.kind === 'post' ? (activeItem.role?.name || t('smmPost')) : activeItem.name,
-      activeItem,
-    );
   };
 
   const submitChatCreate = async () => {
@@ -1078,8 +1116,8 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   };
 
   // feed slide commit — the SAME contract the tests feed keeps: the visible
-  // slide IS the active card (the «Изменить» own-detection and the edit-mode
-  // UI bind to it).
+  // slide IS the active card (the bottom-bar заявка/приглашение action binds
+  // to it).
   const commitSlide = (idx: number) => {
     const it = filtered[Math.min(Math.max(0, idx), filtered.length - 1)];
     if (it && it.id !== smmNow().activeCardId) useSmmStore.setState({ activeCardId: it.id });
@@ -1135,62 +1173,15 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     return (s || '?').toUpperCase();
   })();
 
-  // ── THE EDIT WINDOW TARGET («Изменить» from a card or the switcher) ─────
-  // Somebody else's мероприятие/пост is NEVER edited in place — the test-card
-  // rule (startEditTest → copyTest): the server makes a private VERSION of
-  // the original (parentId = the source). THEN THE USER'S RULE kicks in:
-  // «Изменить» ALWAYS works and TRANSLATES the user into their own account —
-  // the копия lands in the ЛИЧНАЯ библиотека of the matching side (event →
-  // заказчик, post → СММ специалист), so after the click the user stands in
-  // their own library with the template editable right there. Own cards open
-  // in the window directly (no copy, no jump).
-  const openEditWindow = async (kind: 'event' | 'post' | 'specialist', id: string, title: string, item?: AnyItem) => {
-    // one window at a time: the AI panel / files / chat windows yield
-    setAiOpen(false);
-    useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
-    if (kind === 'specialist') {
-      // The specialist card is edited through YOUR profile (name/avatar);
-      // a stranger's card can never be changed.
-      if (id === myId) setMeOpen(true);
-      else toast(t('smmEditOwnOnly'));
-      return;
-    }
-    // own-or-not: the captured card first, then the seen-cards cache (every
-    // rendered card), then the current dashboard list — the button must work
-    // from EVERY surface the card can appear on.
-    const known = (item as any) || (seenItemsRef.current as any)[id] || (items.find(x => x.id === id) as any);
-    const own = kind === 'post' ? known?.specialistId === myId : known?.customerId === myId;
-    if (own) { setEditWin({ kind, id, title }); return; }
-    setBusy(true);
-    toast(t('copyCreating'));
-    try {
-      const copy: any = kind === 'post' ? await api.copySmmPost(id) : await api.copySmmEvent(id);
-      // THE JUMP (reworked): the copy always lands on the matching side of
-      // the account (event → customerId = me, post → specialistId = me) in
-      // the ЛИЧНАЯ библиотека. The view STAYS in the user's fixed tab (no
-      // role switcher exists — separate registration), so we just reload the
-      // personal list and open the template in the edit window right here.
-      toast(t('smmCopyLanded'));
-      gotoLibrary(false);
-      useSmmStore.setState((s: any) => ({ refreshNonce: (s.refreshNonce || 0) + 1 }));
-      setEditWin({ kind, id: copy.id, title });
-    } catch (e: any) {
-      toast(e?.message || 'Error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   // ── THE WINDOW SWITCHER — the SAME header dropdown every dashboard window
-  // of the tests site wears (dashSwitcher): files / AI / chat / edit, ALL
+  // of the tests site wears (dashSwitcher): files / AI / chat, ALL
   // windows of ONE card share it, so switching from the chat window that
-  // slid up from the bottom lands you in the «Прикреплённые файлы» or
-  // «Изменить» window of the SAME card without closing anything.
+  // slid up from the bottom lands you in the «Прикреплённые файлы»
+  // window of the SAME card without closing anything.
   const smmWindowCard: { kind: 'event' | 'post' | 'specialist'; id: string; title: string } | null = (() => {
     if (filesTarget) return { kind: filesTarget.kind, id: filesTarget.id, title: filesTarget.title };
     if (cardChat) return cardChat;
     if (aiOpen && aiTarget) return aiTarget;
-    if (editWin) return editWin;
     return null;
   })();
   const smmFilesCount = (() => {
@@ -1213,37 +1204,23 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     }] : []),
     { key: 'ai', label: t('aiTutor'), icon: <MessageSquare className="w-3.5 h-3.5" />, active: aiOpen },
     { key: 'group', label: t('chat'), icon: <MessageCircle className="w-3.5 h-3.5" />, active: !!cardChat },
-    ...((smmWindowCard && smmWindowCard.kind !== 'specialist') ? [{
-      key: 'edit' as const,
-      label: smmWindowCard.kind === 'event' ? t('smmEventEdit') : t('smmPostEdit'),
-      icon: <Pencil className="w-3.5 h-3.5" />,
-      active: !!editWin,
-    }] : []),
   ];
   const smmSwitcher = { options: smmSheetOptions, onSelect: (key: string) => {
     if (!smmWindowCard) return;
     const w = smmWindowCard;
-    if (key === 'edit') {
-      // the edit window for the SAME card the switcher lives on
-      if (w.kind === 'specialist') return;
-      setEditWin(null);
-      void openEditWindow(w.kind, w.id, w.title);
-      return;
-    }
     if (key === 'files') {
-      setEditWin(null); setAiOpen(false);
+      setAiOpen(false);
       const cached = filesItemRef.current[w.id];
       if (cached) useSmmStore.setState({ filesTarget: cached, topWindow: 'files', openChatId: null });
       return;
     }
     if (key === 'ai') {
-      setEditWin(null);
       useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
       openSmmAi(w.kind, w.id, w.title);
       return;
     }
     if (key === 'group') {
-      setEditWin(null); setAiOpen(false);
+      setAiOpen(false);
       useSmmStore.setState({ cardChat: { kind: w.kind, id: w.id, title: w.title }, topWindow: 'card-chat', openChatId: null });
     }
   } };
@@ -1251,7 +1228,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const makeCtx = (it: AnyItem, selected: boolean): CardCtx => ({
     t,
     myId,
-    editMode,
     bookmarked: it.kind === 'event' ? bookmarkOf('event', it.id) : it.kind === 'post' ? bookmarkOf('post', it.id) : bookmarkOf('specialist', it.id),
     onToggleBookmark: () => {
       if (it.kind === 'event') void toggleBookmark('event', it.id);
@@ -1327,19 +1303,12 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     onChat: () => {
       // «Чат» on the card = the per-card GROUP CHAT WINDOW — everyone's chat
       // about THIS card, the exact mechanic the test cards keep. One window
-      // at a time: the AI panel and the edit window close (the same rule the
-      // test card keeps).
+      // at a time: the AI panel closes (the same rule the test card keeps).
       setAiOpen(false);
-      setEditWin(null);
       const title = it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.kind === 'specialist' ? it.name : t('smmTicketTitle');
       useSmmStore.setState({ cardChat: { kind: it.kind, id: it.id, title }, topWindow: 'card-chat', openChatId: null });
     },
     onShare: () => { if (it.kind === 'event' || it.kind === 'post') void doShare(it.kind, it.id); },
-    onEdit: () => {
-      if (it.kind === 'specialist') openEditWindow('specialist', it.id, it.name, it);
-      else if (it.kind === 'event') openEditWindow('event', it.id, it.title, it);
-      else if (it.kind === 'post') openEditWindow('post', it.id, it.role?.name || t('smmPost'), it);
-    },
     onDelete: () => {
       // «Удалить» opens the same confirm-first dialog the test cards open —
       // the delete itself happens only after the confirmation. (A СОС-тикет
@@ -1405,7 +1374,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   // specialist in sight it opens the public library (where specialist cards
   // live), with no own events it leads to the event editor, with a role-less
   // specialist it says so. The specialist mode keeps the contextual
-  // «Подать заявку» / «Изменить» behavior.
+  // «Подать заявку» / «Пригласить» behavior.
   const barAction = (() => {
     // the MAP window keeps the frame but drops the context bar — the map has
     // its own floating «добавить спот» control; the chat page / checklist /
@@ -1442,12 +1411,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     // chats / requests windows keep the bar standing too («всегда в панели»)
     const mainVisible = topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat';
     if (!mainVisible && topWindow !== 'bookmarks' && topWindow !== 'chats' && topWindow !== 'requests') return null;
-    if (editMode) {
-      const canEdit = (activeItem?.kind === 'post' && activeItem.specialistId === myId)
-        || (activeItem?.kind === 'event' && activeItem.customerId === myId);
-      if (canEdit && activeItem) return { label: activeItem.kind === 'post' ? t('smmPostEdit') : t('smmEventEdit'), fn: startEditActive };
-      return null;
-    }
     if (isSpecialist) {
       if (mainVisible && activeItem?.kind === 'event' && activeEvent && activeEvent.customerId !== myId) {
         // Disabled only in the transient state «roles exist but none picked»
@@ -1482,7 +1445,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     : topWindow === 'map' ? t('mapTitle') : null;
 
   const renderCard = (it: AnyItem, selected: boolean, variant: 'grid' | 'shelf' | 'slide' | 'feed') => {
-    seenItemsRef.current[it.id] = it; // «Изменить» own-detection from ANY surface
+    seenItemsRef.current[it.id] = it; // the invite-flow own-detection from ANY surface
     // THE СОС-ТИКЕТ card — the admin's library item (no marketplace ladder,
     // its own support ladder instead)
     if (it.kind === 'ticket') {
@@ -1843,7 +1806,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
                   <div className="flex-1 min-w-0">
                     <ChatRow title={c.title || (c.kind === 'direct' ? 'Диалог' : 'Чат')} last={c.lastMessage} active={false} onClick={() => useSmmStore.setState({ openChatId: c.id })} />
                   </div>
-                  {editMode && c.ownerId === myId && (
+                  {c.ownerId === myId && (
                     <>
                       <Button size="sm" variant="outline" className="h-8 w-8 p-0 rounded-full border-black/30 shrink-0"
                         onClick={() => { setRenamingChatId(c.id); setChatCreateOpen(true); setChatTitle(c.title); }}>
@@ -2068,10 +2031,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
                 <Button onClick={startCreate} className="rounded-full bg-primary hover:bg-primary/90 shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm">
                   <Plus className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{isSpecialist ? (personal ? t('smmPostCreate') : t('smmRequestsMine')) : (personal ? t('smmEventCreate') : t('smmRequestsMine'))}</span>
                 </Button>
-                <Button variant="outline" onClick={() => useSmmStore.setState({ editMode: !editMode })}
-                  className={`rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-4 lg:h-10 lg:text-sm ${editMode ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}>
-                  <Edit className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">{t('editTest')}</span>
-                </Button>
               </>
             )}
           </div>
@@ -2140,7 +2099,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       {/* ── MAIN ── */}
       {renderMainWindow()}
 
-      {/* ── BAR 1: the context action (Подать заявку / Пригласить / Изменить).
+      {/* ── BAR 1: the context action (Подать заявку / Пригласить).
       desktop-dock-raised: the SMM dashboard stacks TWO docks — the library
       dock at the very bottom and this bar above it — without the raise the
       bar paints OVER the library dock. (The third dock — the role switcher —
@@ -2315,71 +2274,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           switcher={smmSwitcher}
         />
       )}
-      {/* THE EDIT WINDOW — «Изменить» from a card or the window switcher: the
-      SAME resizable sheet the test cards open (the editor body inside + Save
-      in the footer; the header wears the window switcher). Somebody else's
-      card first became a private VERSION copy — the rule startEditTest keeps. */}
-      {editWinMounted && editWinLast.current && (() => {
-        const w = editWinLast.current;
-        const title = w.kind === 'event' ? t('smmEventEdit') : t('smmPostEdit');
-        return (
-          <ResizableSheetFrame
-            open={!!editWin}
-            onClose={() => setEditWin(null)}
-            initialVh={0.85}
-            minVh={0.4}
-            maxW="max-w-3xl"
-            header={
-              <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
-                <SheetHeaderSwitcher
-                  icon={<Pencil className="w-4 h-4 text-white" />}
-                  title={title}
-                  subtitle={w.title}
-                  options={smmSheetOptions}
-                  onSelect={smmSwitcher.onSelect}
-                />
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => setEditWin(null)}>
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            }
-            body={
-              <div className="px-4 py-4">
-                <div className="max-w-3xl mx-auto space-y-4">
-                  {w.kind === 'event' ? (
-                    <SmmEventForm
-                      ref={editEventFormRef}
-                      editingId={w.id}
-                      onSaving={setEditWinSaving}
-                      onSaved={() => { setEditWin(null); bumpAndReload(); }}
-                      onFail={() => setEditWin(null)}
-                    />
-                  ) : (
-                    <SmmPostForm
-                      ref={editPostFormRef}
-                      editingId={w.id}
-                      onSaving={setEditWinSaving}
-                      onSaved={() => { setEditWin(null); bumpAndReload(); }}
-                      onFail={() => setEditWin(null)}
-                    />
-                  )}
-                </div>
-              </div>
-            }
-            footer={
-              <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-4 pt-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
-                <Button
-                  onClick={() => (w.kind === 'event' ? editEventFormRef.current?.save() : editPostFormRef.current?.save())}
-                  disabled={editWinSaving}
-                  className="w-full rounded-full bg-primary hover:bg-primary/90"
-                >
-                  {editWinSaving ? t('saving') : t('save')}
-                </Button>
-              </div>
-            }
-          />
-        );
-      })()}
       {/* ── MY PROFILE — the avatar's «всплывающая снизу страница»: the SAME
       resizable-sheet page type, the ProfileBody inside (avatar/name/company/
       background/logout); the universal back of the sheet is its drag-down +

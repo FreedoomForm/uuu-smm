@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CreatorStrip, tagHash } from '@/components/shared-bits';
 import { eventPlatformIcon, eventPlatformLabel, fmtMoney, mapEmbedUrl, mediaSrc } from './smm-bits';
-import { CalendarClock, ChevronRight, ClipboardList, Bot, Briefcase, Film, Handshake, LayoutGrid, Link2, MapPin, Megaphone, MessageCircle, Paperclip, Pencil, Sparkles, Star, Trash2, Users, Wallet } from 'lucide-react';
+import { CalendarClock, ChevronRight, ClipboardList, Bot, Briefcase, Film, Handshake, LayoutGrid, Link2, MapPin, Megaphone, MessageCircle, Paperclip, Sparkles, Star, Trash2, Users, Wallet } from 'lucide-react';
 import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
 
 export type CardVariant = 'grid' | 'shelf' | 'slide' | 'feed';
@@ -33,13 +33,11 @@ export type CardVariant = 'grid' | 'shelf' | 'slide' | 'feed';
 export interface CardCtx {
   t: (key: string, vars?: Record<string, string | number>) => string;
   myId: string;
-  editMode: boolean;
   bookmarked: boolean;
   onToggleBookmark: () => void;
   onOpenProfile?: () => void;
   onChat: () => void;
   onShare: () => void;
-  onEdit: () => void;
   onDelete: () => void;
   onOpen: () => void;
   // «Обсудить с ИИ» — the same AI discussion the test cards open
@@ -307,9 +305,6 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
           <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
         </Button>
       )}
-      <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
-        <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
-      </Button>
       <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmEventDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
         <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
       </Button>
@@ -333,7 +328,6 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
         {own && !event.parentId && (
           <SlideBtn onClick={ctx.onPublic || (() => {})} icon={<Users className="w-4 h-4 shrink-0 text-primary" />} label={t('gPublic')} />
         )}
-        <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
       </>
     );
@@ -437,9 +431,6 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
           <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
         </Button>
       )}
-      <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('smmPostEdit')} className={LADDER_BTN}>
-        <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
-      </Button>
       <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmPostDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
         <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
       </Button>
@@ -459,7 +450,7 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
       {media.slice(0, 8).map((m, i) => (
         m.type === 'image' ? (
           <button key={i} type="button" onClick={() => ctx.onImageOpen?.(mediaSrc(m.url))} className="w-12 h-12 rounded-lg overflow-hidden border border-black/10 shrink-0">
-            <img src={mediaSrc(m.url)} alt="" className="w-full h-full object-cover" />
+            <img src={mediaSrc(m.url)} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
           </button>
         ) : (
           <span key={i} className="w-12 h-12 rounded-lg bg-[#FFF0D9] text-cta flex items-center justify-center shrink-0"><Film className="w-5 h-5" /></span>
@@ -483,7 +474,6 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         {own && !post.parentId && (
           <SlideBtn onClick={ctx.onPublic || (() => {})} icon={<Users className="w-4 h-4 shrink-0 text-primary" />} label={t('gPublic')} />
         )}
-        <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
       </>
     );
@@ -634,9 +624,6 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
       <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('gFiles')} className={LADDER_BTN}>
         <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
       </Button>
-      <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
-        <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
-      </Button>
       <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmSpecialistDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
         <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
       </Button>
@@ -653,7 +640,6 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
         <SlideBtn onClick={ctx.onAi} icon={<Bot className="w-4 h-4 shrink-0" />} label={t('aiDiscuss')} tone={ctx.aiActive ? 'ai' : undefined} />
         <SlideBtn onClick={ctx.onChat} icon={<MessageCircle className="w-4 h-4 shrink-0" />} label={t('gChat')} />
         <SlideBtn onClick={ctx.onFiles} icon={<Paperclip className="w-4 h-4 shrink-0" />} label={t('gFiles')} />
-        <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
       </>
     );
