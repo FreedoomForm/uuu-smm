@@ -1492,7 +1492,10 @@ export async function submitChecklistItem(
   const value = String(body.value || "").trim().slice(0, 3000);
   const valueKind = body.valueKind === "file" ? "file" : "link";
   if (!value) throw ApiError.badRequest("The slot needs a link or a file");
-  if (valueKind === "link" && !/^https?:\/\/\S+/i.test(value)) {
+  // The SAME link normalizer the заявка flow keeps: «t.me/…»,
+  // «instagram.com/…», «@handle» all become full https:// links.
+  const normalizedValue = valueKind === "link" ? normalizeAdUrl(value) : value;
+  if (valueKind === "link" && !/^https?:\/\/\S+/i.test(normalizedValue)) {
     throw ApiError.badRequest("The link must start with http(s)://");
   }
   const prev = entries.find((x) => x.idx === idx);
@@ -1500,7 +1503,7 @@ export async function submitChecklistItem(
   const next = entries.filter((x) => x.idx !== idx);
   next.push({
     idx, label: def[idx].label, desc: def[idx].desc,
-    value, valueKind,
+    value: normalizedValue, valueKind,
     status: "submitted",
     note: String(body.note || "").slice(0, 1000),
     updatedAt: new Date().toISOString(),

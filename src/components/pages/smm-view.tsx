@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { api } from '@/lib/api';
+import { normalizeAdUrl } from '@/lib/ad-url';
 import { Skeleton } from '@/components/ui/skeleton';
 import { tUI } from '@/lib/i18n';
 import { CreatorStrip } from '@/components/shared-bits';
@@ -802,7 +803,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     if (!value.trim()) { toast(t('smmChecklistNeedValue')); return; }
     setClBusy(idx);
     try {
-      await api.submitChecklistItem(checklistCtx.dealType, checklistCtx.dealId, idx, value.trim(), valueKind);
+      await api.submitChecklistItem(checklistCtx.dealType, checklistCtx.dealId, idx, valueKind === 'link' ? normalizeAdUrl(value.trim()) : value.trim(), valueKind);
       toast(t('smmChecklistSubmittedToast'));
       setClValues(prev => ({ ...prev, [idx]: '' }));
       void fetchChecklist(checklistCtx.dealType, checklistCtx.dealId);
