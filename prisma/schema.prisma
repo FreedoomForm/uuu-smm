@@ -1,0 +1,807 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  // Profile photo: `tg:<file_id>` (stored in the Telegram channel) or a small
+  // data: URL fallback. Served by GET /api/users/[id]/avatar.
+  image     String?
+  // Test-taking background: key of a client-side preset list (TEST_BG_PRESETS).
+  // null/'' = the standard app background. Edited on the profile page.
+  bgStyle   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tests     Test[]
+  attempts  TestAttempt[]
+  chatMessages ChatMessage[]
+  // Notes the user wrote ABOUT tests (the "small contribution" path: when a
+  // copy would change fewer than 2 questions, the app asks for a note instead)
+  notes     TestNote[]
+  // Tests the user saved to their personal library via the bookmark button
+  bookmarks Bookmark[]
+  // Tag-based interests picked during onboarding — seeds the For You feed
+  interests String[] @default([])
+  affinities TagAffinity[]
+  // Interface language (en/ru/uz) — lives HERE, never on the device
+  lang      String   @default("en")
+  // Server-side sessions: the device holds only an opaque httpOnly cookie
+  // that maps to these rows. Zero user data on the phone.
+  sessions  Session[]
+  // AI-tutor conversations, one per test (previously localStorage)
+  aiThreads AiThread[]
+  // Saved in-test progress ("Continue Test"), previously localStorage
+  savedProgress SavedProgress[]
+
+  // ── SMM MARKETPLACE ────────────────────────────────────────────────────
+  // Account kind: "customer" (заказчик: предприниматель/государство) or
+  // "specialist" (SMM-специалист). Chosen at registration, switchable in
+  // the profile; the dashboard feed swaps its content kind accordingly.
+  smmRole      String  @default("customer")
+  // Specialist profile (the «анкета»): short headline, resume text,
+  // presentation video (tg:/data:/https: — served like other media),
+  // city, rate text and the «open to work» flag.
+  smmHeadline  String  @default("")
+  smmResume    String  @default("")
+  smmVideoUrl  String?
+  smmCity      String  @default("")
+  smmRate      String  @default("")
+  smmReady     Boolean @default(true)
+  // Specialist rating shown on their card (0 = not rated yet → «—»)
+  smmRating    Float   @default(0)
+  // Premium profile badge (monetization: premium-профили). MVP: the flag is
+  // flipped by the profile page; billing comes later.
+  smmPremium   Boolean @default(false)
+  // COMPANY PROFILE (the customer side of the tourism marketplace): the
+  // tourism business's public card — name + type (hotel/guesthouse/guide/
+  // tour-agency) + city. Shown in the companies catalog and on their orders.
+  smmCompanyName String @default("")
+  smmCompanyType String @default("") // "hotel" | "guesthouse" | "guide" | "tour-agency" | "other"
+  smmCompanyCity  String @default("")
+  smmBookmarks SmmBookmark[]
+  // Shared role templates («Общие роли») authored by this user
+  smmSharedRoles         SmmSharedRole[] @relation("SmmSharedRoleAuthor")
+  // Opposite sides of the SMM relations
+  smmEventsOwned         SmmEvent[]      @relation("SmmEventCustomer")
+  smmInvitationsSent     SmmInvitation[] @relation("SmmInvitationCustomer")
+  smmInvitationsReceived SmmInvitation[] @relation("SmmInvitationSpecialist")
+  smmApplications        SmmApplication[] @relation("SmmApplicationSpecialist")
+  smmChatMessages        SmmChatMessage[]
+  // Запросы — the specialist's structured proposals (created with «+»,
+  // edited with «изменить», filled step-by-step, sent to events)
+  smmRequests            SmmRequest[]    @relation("SmmRequestSpecialist")
+  // Public role task templates («Общие роли») authored by this user
+  smmRoleTemplates       SmmRole[]       @relation("SmmRoleAuthor")
+  // Specialist's professional roles (the «роли» list on their card)
+  smmRoles               SmmRole[]       @relation("SmmRoleOwner")
+  // Posts (video / photo collection + description) — one per role
+  smmPosts               SmmPost[]
+  // Group chats this user created
+  smmChatsOwned          SmmChat[]       @relation("SmmChatOwner")
+  // Photo spots placed on the public map
+  photoSpots             PhotoSpot[]     @relation("PhotoSpotAuthor")
+  // Отзывы (Mercur/Sharetribe deal reviews): written by me / received about me
+  smmReviewsWritten      SmmReview[]     @relation("SmmReviewAuthor")
+  smmReviewsReceived     SmmReview[]     @relation("SmmReviewTarget")
+}
+
+// Opaque session token → user. The phone stores ONLY the token cookie
+// (httpOnly, unreadable by JS); every user field stays in the database.
+model Session {
+  id        String   @id // 48-char random hex token
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+  @@index([expiresAt]) // opportunistic purge of expired rows
+}
+
+// AI-tutor thread — MANY conversations per (user, test) are allowed: the
+// «Новый чат» button in the history drawer starts a fresh thread while the
+// old ones stay in the list. Previously `ai_threads_<uid>` in localStorage.
+model AiThread {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  testId    String
+  title     String   @default("")
+  messages  Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, updatedAt])
+}
+
+// Saved in-test progress ("Continue Test") per (user, test) — the exact
+// shuffled order, answers, practice reveals and position.
+// Previously `chemtest_progress_v1:<uid>:<testId>` in localStorage.
+model SavedProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  testId    String
+  data      Json
+  savedAt   DateTime @default(now()) @updatedAt
+
+  @@unique([userId, testId])
+  @@index([userId])
+}
+
+// Server-side machine-translation cache (replaces the client localStorage
+// translation cache — shared by every visitor, survives restarts).
+// ─── SMM MARKETPLACE ────────────────────────────────────────────────────────
+
+// A file attached to an SMM owner: a specialist's анкета (resume, portfolio
+// works) or a customer's event (briefs, media). ownerType: "user" | "event".
+// The url reuses the same storage rules as Attachment: tg:<file_id> (the
+// Telegram channel) or a small data: URL; uploads go through the SAME
+// POST /api/attachments/upload route.
+model SmmFile {
+  id          String   @id @default(cuid())
+  ownerType   String // "user" | "event"
+  ownerId     String // user id or event id (polymorphic, no FK — cleanup in service)
+  title       String
+  type        String   @default("link") // "audio" | "video" | "pdf" | "image" | "link"
+  url         String
+  size        Int?
+  tgMessageId Int?
+  orderNum    Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([ownerType, ownerId, orderNum])
+}
+
+// Мероприятие — created by a CUSTOMER. Carries the full brief the brief
+// describes: what to cover, deadlines, payment, restrictions; the roles
+// (with their ТЗ templates) hang off it.
+model SmmEvent {
+  id           String   @id @default(cuid())
+  customerId   String
+  customer     User     @relation("SmmEventCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  title        String
+  summary      String   @default("") // краткое описание для карточки
+  brief        String   @default("") // полное ТЗ / описание мероприятия
+  deadline     String   @default("") // срок (текстом: «до 15 ноября»)
+  budget       String   @default("") // оплата
+  restrictions String   @default("") // ограничения и доп. условия
+  // Who is hiring: "business" (предприниматель) | "government" (государство)
+  kind         String   @default("business")
+  // ── БИРЖА УСЛУГ: the service category of the order ─────────────────────
+  // "instagram" | "reels" | "hotel-review" | "photo" | "content-plan" |
+  // "blogger-tour" | "other". blogger-tour = БЛОГЕР-ТУР: the barter deal
+  // (stay/tour in exchange for content) — the `barter` field carries what
+  // the executor GETS (nights, tour, transfer…).
+  category     String   @default("other")
+  // What the executor receives in exchange for content (barter deals —
+  // blogger tours: «2 ночи в номере + завтраки + трансфер»).
+  barter       String   @default("")
+  // ── THE 4 EVENT FACTS (the interface elements every event card shows
+  // instead of the test card's questions/answers) ─────────────────────────
+  // Format: "online" | "offline". Online → platform (instagram |
+  // telegram | youtube | tiktok); offline → location text rendered as a
+  // live map embed on the card.
+  format       String   @default("online")
+  platform     String   @default("") // instagram | telegram | youtube | tiktok
+  location     String   @default("") // адрес / место (offline) — map embed
+  timeAt       String   @default("") // время проведения (текстом)
+  // Qualification tests the customer attached (their OWN tests, ordered):
+  // the specialist passes them on the «подать заявку» screen.
+  testIds      String[] @default([])
+  // The «Прикреплённые файлы» section of the event editor — the SAME
+  // attachment shape the test editor keeps (title/type/url/size/tgMessageId):
+  // audio, video, pdf, image, embed, link. Shown in the card's files window.
+  attachments  Json?
+  coverColor   String?
+  coverIcon    String?
+  isPublic     Boolean  @default(true)
+  // Version-tree rule (the SAME one the tests keep): «Изменить» on somebody
+  // else's мероприятие makes a private VERSION of the original — it lands in
+  // the copier's ЛИЧНАЯ библиотека (parentId = the source), never public.
+  parentId     String?
+  versionName  String?
+  status       String   @default("open") // "open" | "closed"
+  roles        SmmRole[]
+  invitations  SmmInvitation[]
+  applications SmmApplication[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([customerId, createdAt])
+  @@index([isPublic, createdAt, id])
+}
+
+// Роль в мероприятии — the customer's reusable ТЗ template. Specialists
+// apply (or are invited) for a concrete role. A role can also live WITHOUT
+// an event as a PUBLIC TASK TEMPLATE («Общие роли»): eventId = null,
+// isPublic = true, authorId = the sharing user.
+model SmmRole {
+  id       String   @id @default(cuid())
+  eventId  String?
+  event    SmmEvent? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name     String
+  brief    String   @default("") // ТЗ роли — the template text
+  payment  String   @default("")
+  deadline String   @default("")
+  orderNum Int      @default(0)
+  // ── SPECIALIST'S OWN ROLE («роли» on their card) ────────────────────────
+  // The specialist's price list for this role: per 1000 views (online
+  // events) and per day of 8 hours (offline events).
+  ownerId  String?
+  owner    User?    @relation("SmmRoleOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  pricePerK   Float?  // цена за 1000 просмотров (онлайн)
+  pricePerDay Float?  // цена за день (8 часов) участия (оффлайн)
+  // Public template flag («Общие роли» — people share task templates)
+  isPublic Boolean  @default(false)
+  // Template author (null for the roles created inside an event)
+  authorId String?
+  author   User?    @relation("SmmRoleAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  posts    SmmPost[]
+  createdAt DateTime @default(now())
+  invitations SmmInvitation[]
+  applications SmmApplication[]
+
+  @@index([eventId, orderNum])
+  @@index([isPublic, createdAt])
+  @@index([authorId])
+  @@index([ownerId])
+}
+
+// ПОСТ — the specialist's card about their work for ONE role: a video or a
+// photo collection + a description. ONE post per role (@@unique(roleId)) —
+// the same specialist cannot have two posts about the same role.
+model SmmPost {
+  id           String   @id @default(cuid())
+  specialistId String
+  specialist   User     @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  roleId       String   @unique
+  role         SmmRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  description  String   @default("")
+  // Media list: [{ url, type: "video"|"image", title? }] — tg:/data:/https:
+  media        Json?
+  // The «Прикреплённые файлы» section of the post editor — the SAME
+  // attachment shape the test editor keeps; shown in the files window
+  // next to the media collection.
+  attachments  Json?
+  // АВТОПОСТ: the system created this post in the specialist's ЛИЧНАЯ
+  // библиотека right after a deal completed (both sides confirmed) — the
+  // «автоматически созданные системой посты после выполнения задачи».
+  // Cleared when the specialist edits the post manually.
+  autoGenerated Boolean  @default(false)
+  coverColor   String?
+  coverIcon    String?
+  isPublic     Boolean  @default(true)
+  // Version-tree rule (the SAME one the posts keep): «Изменить» on somebody
+  // else's пост makes a private VERSION of the original in the copier's
+  // personal library (parentId = the source), never public.
+  parentId     String?
+  versionName  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([specialistId, createdAt])
+}
+
+// ЗАПРОС — the specialist's structured proposal: created with «+» (the test
+// editor's twin), edited with «изменить», FILLED step-by-step on the
+// test-taking twin page (each step = a card), then SENT to an event's role
+// (the SmmApplication carries the requestId). isPublic = shared to the
+// general library where other users browse the templates.
+model SmmRequest {
+  id           String   @id @default(cuid())
+  specialistId String
+  specialist   User     @relation("SmmRequestSpecialist", fields: [specialistId], references: [id], onDelete: Cascade)
+  title        String
+  summary      String   @default("") // краткое описание для карточки
+  coverColor   String?
+  coverIcon    String?
+  isPublic     Boolean  @default(false)
+  steps        SmmRequestStep[]
+  applications SmmApplication[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([specialistId, createdAt])
+  @@index([isPublic, createdAt, id])
+}
+
+// Шаг запроса — one card on the filling screen (the question-card twin):
+// the title + hint describe WHAT to do, the answer is the specialist's text.
+model SmmRequestStep {
+  id        String @id @default(cuid())
+  requestId String
+  request   SmmRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  title     String
+  hint      String @default("")
+  answer    String @default("") // the specialist's filled content
+  orderNum  Int    @default(0)
+
+  @@index([requestId, orderNum])
+}
+
+// Приглашение: the CUSTOMER invites a SPECIALIST to an event role
+// («Отправить SMM-специалисту приглашение» → роль → «Дополнительные
+// настройки» уникального ТЗ). Accepted = the event has the specialist
+// for that role.
+model SmmInvitation {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        SmmEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  roleId       String
+  role         SmmRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     User     @relation("SmmInvitationCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  specialistId String
+  specialist   User     @relation("SmmInvitationSpecialist", fields: [specialistId], references: [id], onDelete: Cascade)
+  message      String   @default("") // уникальное ТЗ из «Дополнительных настроек»
+  // Примерная сумма (the estimate screen's number): pricePerDay × days for
+  // offline, pricePerK × expected blocks for online — computed at send time.
+  estimate     Float?
+  status       String   @default("pending") // pending | accepted | declined | completed
+  // Deal completion (Mercur order lifecycle): the deal becomes «completed»
+  // only when BOTH sides confirm — that unlocks the reviews for this deal.
+  completedByCustomer   Boolean   @default(false)
+  completedBySpecialist Boolean   @default(false)
+  completedAt           DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reviews SmmReview[]
+
+  @@index([specialistId, status])
+  @@index([eventId, status])
+}
+
+// ЧАТ — a conversation card: a GROUP chat anybody creates (title editable
+// by the owner) or a DIRECT dialog between a customer and a specialist
+// (auto-created when a заявка/приглашение is sent). Messages reuse
+// SmmChatMessage with scopeType="chat", scopeId=chat.id.
+model SmmChat {
+  id        String   @id @default(cuid())
+  kind      String   @default("group") // "group" | "direct"
+  title     String   @default("")
+  ownerId   String?
+  owner     User?    @relation("SmmChatOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  // Direct dialog pair (kind="direct", ordered so a<b — one row per pair)
+  aId       String?
+  bId       String?
+  lastMessageAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([kind, lastMessageAt])
+  @@index([ownerId])
+}
+
+// Заявка: the SPECIALIST applies to an event role («Подать заявку» → роль →
+// уникальный текст заявки через «Дополнительные настройки»). The customer
+// accepts → the event gets the specialist for that role.
+model SmmApplication {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        SmmEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  roleId       String
+  role         SmmRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  specialistId String
+  specialist   User     @relation("SmmApplicationSpecialist", fields: [specialistId], references: [id], onDelete: Cascade)
+  // Optional structured запрос: when the specialist sends one of their
+  // SmmRequest documents, the link lands here (the «Отправленные запросы»
+  // page shows the запрос's steps and the customer sees the full structure).
+  requestId    String?
+  request      SmmRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  message      String   @default("")
+  // ── ЗАЯВКА БЕЗ ТЕСТА: ссылка на рекламу ─────────────────────────────────
+  // The specialist does NOT pass qualification tests to apply — they attach
+  // a LINK to a video / post (Instagram, TikTok, YouTube… the platform the
+  // event's ТЗ names) that contains the ad. proofNote = an optional comment
+  // (what the link shows, reach, results).
+  proofUrl      String   @default("")
+  proofNote     String   @default("")
+  // Legacy qualification result (kept for old rows): the specialist's total
+  // correct answers across the event's tests.
+  score         Int     @default(0)
+  totalQuestions Int    @default(0)
+  status       String   @default("pending") // pending | accepted | declined | completed
+  // Deal completion (both-side confirmation) — mirrors SmmApplication.
+  completedByCustomer   Boolean   @default(false)
+  completedBySpecialist Boolean   @default(false)
+  completedAt           DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reviews SmmReview[]
+
+  @@index([eventId, status])
+  @@index([specialistId, status])
+}
+
+// ОТЗЫВ — the deal review adopted from the Mercur/Sharetribe marketplace
+// model: when BOTH sides confirm the deal is done (status="completed"), each
+// side rates the other (1-5 stars + comment). The average powers the real
+// star ratings in the catalog/profile (User.smmRating stays legacy).
+model SmmReview {
+  id        String   @id @default(cuid())
+  // The deal this review closes: a SmmApplication or a SmmInvitation. The
+  // polymorphic pair (dealType + dealId) powers the dup-guard/queries, the
+  // nullable FKs are the real relations Prisma enforces.
+  dealType  String // "application" | "invitation"
+  dealId    String
+  applicationId String?
+  application   SmmApplication? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  invitationId  String?
+  invitation    SmmInvitation?  @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  eventId   String
+  authorId  String
+  author    User     @relation("SmmReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  targetId  String
+  target    User     @relation("SmmReviewTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  rating    Int // 1..5
+  comment   String   @default("")
+  createdAt DateTime @default(now())
+
+  @@unique([dealType, dealId, authorId])
+  @@index([targetId])
+}
+
+// ФОТО-СПОТ — one pin on the public photo-spots map (столп 3: красивые
+// места с советами «где снимать, в какое время, какой ракурс»). Public
+// page: open to EVERY visitor (SEO traffic), adding — authorized only.
+model PhotoSpot {
+  id          String   @id @default(cuid())
+  authorId    String
+  author      User     @relation("PhotoSpotAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  title       String
+  description String   @default("") // что в кадре, чем известно место
+  // Map pin: decimal degrees as strings (exactness without float noise)
+  lat         String
+  lng         String
+  place       String   @default("") // текстовый адрес/регион (Samarkand, Bukhara…)
+  bestTime    String   @default("") // лучшее время («рассвет 6:20–7:00»)
+  angleTips   String   @default("") // ракурс/совет («снимать с моста на юг»)
+  // Photos: [{ url, type }] — the SAME media shape SmmPost keeps (tg:/data:/https:)
+  media       Json?
+  tags        String[] @default([])
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isPublic, createdAt])
+}
+
+// Общий шаблон роли («Общие роли») — a ТЗ template anybody publishes so
+// other people can reuse it in their own events. Created either from an
+// existing event role (sourceRoleId/sourceEventId keep the provenance, one
+// template per source role) or standalone from the Shared-roles page.
+model SmmSharedRole {
+  id            String   @id @default(cuid())
+  authorId      String
+  author        User     @relation("SmmSharedRoleAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  name          String
+  brief         String   @default("") // ТЗ текст — the template body
+  payment       String   @default("")
+  deadline      String   @default("")
+  // Provenance: set when the template was published from an event role.
+  // sourceRoleId is UNIQUE — republishing a role updates its template
+  // instead of duplicating it, and unpublishing removes exactly that one.
+  sourceEventId String?
+  sourceRoleId  String?  @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([authorId, createdAt])
+  @@index([createdAt])
+}
+
+// SMM personal library: a customer pins SPECIALISTS, a specialist pins
+// EVENTS. (Polymorphic — the test Bookmark table stays untouched.)
+model SmmBookmark {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetType String // "specialist" | "event"
+  targetId   String
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, targetType, targetId])
+  @@index([userId])
+}
+
+// Group chat about an SMM entity: an EVENT (participants discuss the offer)
+// or a SPECIALIST (users discuss the person's competence). Same polled
+// pattern as the per-test ChatMessage.
+model SmmChatMessage {
+  id        String   @id @default(cuid())
+  scopeType String // "event" | "specialist" | "shared-role" | "chat"
+  scopeId   String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userName  String
+  text      String
+  // "text" = a normal user message, "system" = an auto-posted заявка/приглашение
+  kind      String   @default("text")
+  createdAt DateTime @default(now())
+
+  @@index([scopeType, scopeId, createdAt])
+}
+
+model TranslationCache {
+  id        String   @id @default(cuid())
+  hash      String // fnv1a(source)+len, same scheme the client used
+  lang      String
+  text      String @db.Text
+  createdAt DateTime @default(now())
+
+  @@unique([hash, lang])
+}
+
+model Bookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  testId    String
+  test      Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, testId])
+  @@index([userId])
+}
+
+model Test {
+  id          String   @id @default(cuid())
+  title       String
+  description String   @default("")
+  topic       String   @default("Chemistry")
+  creatorId   String
+  creator     User     @relation(fields: [creatorId], references: [id])
+  questions   Question[]
+  attempts    TestAttempt[]
+  attachments Attachment[]
+  chatMessages ChatMessage[]
+  isPublic    Boolean  @default(true)
+  randomizeQuestions Boolean @default(false)
+  randomizeOptions   Boolean @default(false)
+  tags        String[] @default([])
+  bookmarkedBy Bookmark[]
+  coverImage  String?  // Base64 data URL for AI-generated cover image
+  coverIcon   String?  // emoji picked in the editor from the science icon pack
+  coverColor  String?  // hex color picked in the editor (card/cover background)
+  // Content archive: every save (create/edit/copy) serializes the whole test
+  // (questions, options, correct answers, explanations, translations, photo
+  // refs) into a JSON document stored IN THE TELEGRAM CHANNEL. The DB keeps
+  // only the reference — the file is the portable/backup copy of the test.
+  archiveId    String?
+  archiveMsgId Int?
+  // ---- Version tree -------------------------------------------------
+  // A test created FROM SCRATCH has parentId = null and is the trunk (root)
+  // of its version tree — the only kind of test that may ever be PUBLIC.
+  // A copy made from somebody's test ("Edit") is a VERSION: parentId points
+  // at the direct ancestor, rootId at the tree's trunk. Versions are NEVER
+  // shown in the community library — they are reachable only by direct link
+  // (and inside their owner's personal library).
+  parentId   String?
+  parent     Test?   @relation("TestVersions", fields: [parentId], references: [id], onDelete: SetNull)
+  versions   Test[]  @relation("TestVersions")
+  // Denormalized trunk id (parentId of the whole family chain) — lets the
+  // tree endpoint fetch the whole family in ONE indexed query. Plain string
+  // (no relation) on purpose: the trunk may be deleted while its descendants
+  // stay reachable by link.
+  rootId     String?
+  // How many questions/answers this VERSION changes vs its DIRECT parent
+  // (computed by the server at every save — questionFingerprint diff).
+  // Drives the two states of the "Share link" button on the card: the button
+  // is PASSIVE until a version differs from its parent in >= 2 questions.
+  // Trunks (parentId = null) keep the default 0 — their share button does
+  // not consult this counter at all.
+  changedCount Int    @default(0)
+  // The version's own NAME, given by the author in the naming dialog the
+  // first time the version is saved or shared by link. The card TITLE stays
+  // equal to the source's title (the personal-library one-name-per-family
+  // rule relies on it) — the version name is a separate label shown in the
+  // version tree. null = not named yet (the naming dialog will appear).
+  versionName  String?
+  notes      TestNote[]
+  // AI test passport — generated UNDER THE HOOD at test creation by the AI
+  // analysis of the files and questions, enriched live with the metrics the
+  // site collects (attempts, records, averages). Shown as the x/100 metric
+  // cards inside the "Discuss with AI" window.
+  metrics    TestMetrics?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isPublic, createdAt, id])
+  @@index([creatorId, createdAt])
+  @@index([parentId])
+  @@index([rootId])
+}
+
+// A note ABOUT a test — the product's answer to "I changed almost nothing,
+// I don't deserve a fork": the app blocks trivial copies and asks the user
+// to write a note instead. Notes are visible to everyone who can open the
+// test (they enrich the version-tree view) and stay with the test.
+model TestNote {
+  id        String   @id @default(cuid())
+  testId    String
+  test      Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([testId, createdAt])
+  @@index([userId])
+}
+
+// AI TEST PASSPORT — created in the very beginning of the test's life
+// ("под капотом" at creation/copy time): the AI reads the questions,
+// options, correct answers, explanations and the attached files' titles and
+// grades the test on 0-100 scales. The SITE metrics (how many people took
+// it, the record, the average) are NOT stored here — they are aggregated
+// live from the attempts at read time, so they are always fresh.
+// If the AI chain fails, a deterministic heuristic fills the scales so the
+// passport cards NEVER render empty.
+model TestMetrics {
+  id           String   @id @default(cuid())
+  testId       String   @unique
+  test         Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  // AI-graded scales, 0-100:
+  difficulty   Int?     // how hard the test is
+  crossSubject Int?     // how many disciplines it spans
+  quality      Int?     // question quality (wording, distractors, explanations)
+  // One-line AI summary of what this test covers (shown in the passport).
+  summary      String?
+  // "ai" = graded by the AI chain; "heuristic" = deterministic fallback.
+  genSource    String   @default("ai")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+// Global tag dictionary: every tag used on a test lands here so it can be
+// suggested via autocomplete next time someone types a similar tag
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
+// Per-test group chat: every signed-in user can talk to everyone else
+// taking the same test. Polled client-side (serverless-safe).
+model ChatMessage {
+  id        String   @id @default(cuid())
+  testId    String
+  test      Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userName  String
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([testId, createdAt])
+}
+
+// Files attached to a test (audio/video/PDF/link). Small uploaded files are
+// stored inline as data: URLs; larger course media is referenced by external URL.
+model Attachment {
+  id          String   @id @default(cuid())
+  testId      String
+  test        Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  title       String
+  type        String   @default("link") // "audio" | "video" | "pdf" | "image" | "link"
+  url         String   // external URL or data: URL (small uploads)
+  size        Int?     // bytes, when known
+  // Telegram channel bookkeeping: the channel post that carries this file.
+  // Needed to DELETE the file from the channel when it is removed from the test.
+  tgMessageId Int?
+  orderNum    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([testId]) // FK index
+}
+
+model Question {
+  id        String   @id @default(cuid())
+  testId    String
+  test      Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  text      String
+  optionA   String
+  optionB   String
+  optionC   String
+  optionD   String
+  optionE   String?
+  correctAnswer String @default("A")
+  explanation   String?
+  // Interface-language translations: { ru: { text, options: {A..E}, explanation }, uz: {...} }
+  translations  Json?
+  imageNumber   Int?
+  // Question photo (shown above the answers): stored in the owner's Telegram
+  // channel as `tg:<file_id>` (bytes never touch our DB) or inline `data:` URL
+  // when the bot is not connected. imageMsgId keeps the channel post id so the
+  // photo can be deleted from the channel when it is removed/replaced.
+  imageUrl      String?
+  imageMsgId    Int?
+  // Per-option photos: { "A": { "u": "tg:<file_id>", "m": 12345 }, "C": {...} }.
+  // "u" = url (tg:/data:/https:), "m" = channel post id for cleanup.
+  optionImages  Json?
+  orderNum      Int    @default(0)
+  answers   AttemptAnswer[]
+
+  @@index([testId]) // FK index — Postgres does not auto-index FK columns
+}
+
+model TestAttempt {
+  id        String   @id @default(cuid())
+  testId    String
+  test      Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score     Int      @default(0)
+  totalQuestions Int  @default(0)
+  completed Boolean  @default(false)
+  answers   AttemptAnswer[]
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([testId, startedAt])
+  @@index([userId, startedAt])
+}
+
+// TikTok-style interest profile: every meaningful action on a test
+// (open, start, complete) adds weight to its tags. Read-time half-life decay
+// keeps the profile fresh. Powers the personalized "For You" feed.
+model TagAffinity {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tag       String
+  score     Float    @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, tag])
+  @@index([userId, score])
+}
+
+// Raw engagement stream — the substrate of the recommendation funnel
+// (the same role raw watch events play in YouTube's watch-next / X's
+// candidate sourcing):
+//   * co-visitation (item-item CF): "users who viewed X also viewed Y";
+//   * per-item quality prior (impression → dwell ratio);
+//   * exploration control: how often a test has been TRIED by the feed.
+// kind = "view" (card stayed on screen; ms = dwell) | "skip" (swiped away
+// in under ~1.8 s — the TikTok negative signal). Rows older than 30 days
+// are purged opportunistically.
+model FeedEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  testId    String
+  kind      String   @default("view")
+  ms        Int?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([testId, createdAt])
+  @@index([createdAt]) // serves the opportunistic 30-day purge DELETE
+}
+
+model AttemptAnswer {
+  id        String   @id @default(cuid())
+  attemptId String
+  attempt   TestAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId String
+  question  Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedAnswer String
+  isCorrect Boolean
+
+  @@index([attemptId]) // FK index — every attempt page load scans by it
+  @@index([questionId]) // FK index
+}

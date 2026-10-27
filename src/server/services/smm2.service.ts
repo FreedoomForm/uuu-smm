@@ -1,0 +1,1361 @@
+// ---------------------------------------------------------------------------
+// SMM v2 service — the mode-switcher marketplace built ON the tests site:
+// posts (per role), events (the 4 facts + qualification tests), specialists,
+// заявки/приглашения, chats and SMM bookmarks. Every function is
+// user-scoped; ownership is enforced server-side.
+// ---------------------------------------------------------------------------
+
+import { db } from "@/lib/db";
+import { ApiError } from "../http/errors";
+import { telegramNotify } from "@/lib/telegram";
+
+type PostMedia = { url: string; type: "video" | "image"; title?: string };
+
+// The «Прикреплённые файлы» row — the SAME shape the test attachments keep
+// (title/type/url/size/tgMessageId): audio, video, pdf, image, embed, link.
+type SmmAttachment = {
+  title: string;
+  type: "audio" | "video" | "pdf" | "image" | "embed" | "link";
+  url: string;
+  size?: number | null;
+  tgMessageId?: number | null;
+};
+
+const ATTACHMENT_TYPES = ["audio", "video", "pdf", "image", "embed", "link"];
+
+function asAttachments(v: unknown): SmmAttachment[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((a: any) => a && typeof a.url === "string" && a.url.length < 4000000)
+    .slice(0, 30)
+    .map((a: any) => ({
+      title: String(typeof a.title === "string" && a.title.trim() ? a.title : "Attachment").slice(0, 200),
+      type: (ATTACHMENT_TYPES.includes(a.type) ? a.type : "link") as SmmAttachment["type"],
+      url: String(a.url),
+      ...(typeof a.size === "number" && isFinite(a.size) && a.size >= 0 ? { size: Math.round(a.size) } : {}),
+      ...(typeof a.tgMessageId === "number" ? { tgMessageId: a.tgMessageId } : {}),
+    }));
+}
+
+const publicUser = {
+  select: { id: true, name: true, image: true },
+};
+
+function asMedia(v: unknown): PostMedia[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((m: any) => m && typeof m.url === "string" && m.url.length < 4000000)
+    .slice(0, 30)
+    .map((m: any) => ({
+      url: String(m.url),
+      type: m.type === "video" ? "video" : "image",
+      ...(typeof m.title === "string" ? { title: m.title.slice(0, 200) } : {}),
+    }));
+}
+
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === "string" ? parseFloat(v.replace(",", ".")) : (v as number);
+  return typeof n === "number" && isFinite(n) && n >= 0 ? n : null;
+}
+
+// ── POSTS ───────────────────────────────────────────────────────────────────
+
+export async function listPosts(userId: string, scope: string, targetUserId?: string) {
+  if (scope === "user" && targetUserId) {
+    // Another user's posts (opened from their card/profile) — only their
+    // PUBLISHED ones: автопосты and private versions stay in the personal
+    // library until the specialist publishes them
+    const rows = await db.smmPost.findMany({
+      where: { specialistId: targetUserId, isPublic: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: {
+        role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+        specialist: publicUser,
+      },
+    });
+    return { items: rows };
+  }
+  const rows = await db.smmPost.findMany({
+    where: { specialistId: userId },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: {
+      role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+      specialist: publicUser,
+    },
+  });
+  return { items: rows };
+}
+
+async function upsertRoleForPost(
+  userId: string,
+  roleId: string | undefined,
+  role: { name: string; pricePerK?: unknown; pricePerDay?: unknown } | undefined
+) {
+  if (roleId) {
+    const existing = await db.smmRole.findUnique({ where: { id: roleId } });
+    if (!existing) throw ApiError.notFound("Role not found");
+    if (existing.ownerId && existing.ownerId !== userId) throw ApiError.forbidden("Not your role");
+    return existing;
+  }
+  if (!role || !role.name?.trim()) throw ApiError.badRequest("Role name required");
+  const name = role.name.trim().slice(0, 120);
+  // Role reuse: the specialist's roles are unique by name — sending the same
+  // name again targets the SAME role (so the one-post-per-role rule fires).
+  const existing = await db.smmRole.findFirst({ where: { ownerId: userId, name } });
+  if (existing) {
+    return db.smmRole.update({
+      where: { id: existing.id },
+      data: {
+        ...(role.pricePerK !== undefined ? { pricePerK: numOrNull(role.pricePerK) } : {}),
+        ...(role.pricePerDay !== undefined ? { pricePerDay: numOrNull(role.pricePerDay) } : {}),
+      },
+    });
+  }
+  return db.smmRole.create({
+    data: {
+      name,
+      ownerId: userId,
+      authorId: userId,
+      isPublic: true,
+      pricePerK: numOrNull(role.pricePerK),
+      pricePerDay: numOrNull(role.pricePerDay),
+    },
+  });
+}
+
+export async function createPost(
+  userId: string,
+  body: {
+    roleId?: string;
+    role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown };
+    description?: string;
+    media?: unknown;
+    attachments?: unknown;
+    coverColor?: unknown;
+    coverIcon?: unknown;
+  }
+) {
+  const role = await upsertRoleForPost(userId, body.roleId, body.role);
+  const taken = await db.smmPost.findUnique({ where: { roleId: role.id } });
+  if (taken) throw ApiError.conflict("This role already has a post");
+  const post = await db.smmPost.create({
+    data: {
+      specialistId: userId,
+      roleId: role.id,
+      description: String(body.description || "").slice(0, 8000),
+      media: asMedia(body.media),
+      attachments: asAttachments(body.attachments),
+      coverColor: typeof body.coverColor === "string" ? body.coverColor.slice(0, 32) : null,
+      coverIcon: typeof body.coverIcon === "string" ? body.coverIcon.slice(0, 16) : null,
+    },
+    include: {
+      role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+      specialist: publicUser,
+    },
+  });
+  return post;
+}
+
+async function ownPost(userId: string, id: string) {
+  const post = await db.smmPost.findUnique({ where: { id } });
+  if (!post) throw ApiError.notFound("Post not found");
+  if (post.specialistId !== userId) throw ApiError.forbidden("Not your post");
+  return post;
+}
+
+export async function updatePost(
+  userId: string,
+  id: string,
+  body: {
+    roleId?: string;
+    role?: { name?: string; pricePerK?: unknown; pricePerDay?: unknown };
+    description?: string;
+    media?: unknown;
+    attachments?: unknown;
+    coverColor?: unknown;
+    coverIcon?: unknown;
+    isPublic?: unknown;
+  }
+) {
+  const post = await ownPost(userId, id);
+  const data: Record<string, unknown> = {};
+  // a manual CONTENT save turns an автопост into the specialist's own post
+  // (the badge drops); the «Публичная» toggle alone keeps the badge
+  if (body.description !== undefined || body.media !== undefined || body.attachments !== undefined || body.roleId !== undefined) {
+    data.autoGenerated = false;
+  }
+  if (body.roleId) {
+    const role = await upsertRoleForPost(userId, body.roleId, undefined);
+    const taken = await db.smmPost.findUnique({ where: { roleId: role.id } });
+    if (taken && taken.id !== id) throw ApiError.conflict("This role already has a post");
+    data.roleId = role.id;
+  }
+  if (body.role && typeof body.role.name === "string" && body.role.name.trim()) {
+    // rename / reprice the post's own role
+    const cur = await db.smmPost.findUnique({ where: { id }, include: { role: true } });
+    if (cur?.role && (cur.role.ownerId === userId || !cur.role.ownerId)) {
+      await db.smmRole.update({
+        where: { id: cur.role.id },
+        data: {
+          name: body.role.name.trim().slice(0, 120),
+          ...(body.role.pricePerK !== undefined ? { pricePerK: numOrNull(body.role.pricePerK) } : {}),
+          ...(body.role.pricePerDay !== undefined ? { pricePerDay: numOrNull(body.role.pricePerDay) } : {}),
+        },
+      });
+    }
+  }
+  if (typeof body.description === "string") data.description = body.description.slice(0, 8000);
+  if (body.media !== undefined) data.media = asMedia(body.media);
+  if (body.attachments !== undefined) data.attachments = asAttachments(body.attachments);
+  if (typeof body.coverColor !== "undefined") data.coverColor = typeof body.coverColor === "string" ? body.coverColor.slice(0, 32) : null;
+  if (typeof body.coverIcon !== "undefined") data.coverIcon = typeof body.coverIcon === "string" ? body.coverIcon.slice(0, 16) : null;
+  // «Публичная» on an own post (the SAME level the own заказ cards keep):
+  // publishing an автопост puts it on the specialist's profile. A VERSION
+  // (parentId) can never be public — the events' rule.
+  if (typeof body.isPublic === "boolean") data.isPublic = post.parentId ? false : body.isPublic;
+  return db.smmPost.update({
+    where: { id },
+    data,
+    include: {
+      role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+      specialist: publicUser,
+    },
+  });
+}
+
+export async function deletePost(userId: string, id: string) {
+  await ownPost(userId, id);
+  await db.smmPost.delete({ where: { id } });
+  return { ok: true };
+}
+
+// ── VERSION COPY («Изменить» on somebody else's пост) ───────────────────────
+// The SAME rule the tests keep: the copy is a private VERSION of the original
+// (parentId = the source) in the copier's personal library, never public. The
+// copier gets THEIR OWN role with the source's name + prices (the one-post-
+// per-role rule applies to it), media and attached files ride along.
+export async function copyPost(userId: string, id: string) {
+  const source = await db.smmPost.findUnique({
+    where: { id },
+    include: { role: { select: { name: true, pricePerK: true, pricePerDay: true } } },
+  });
+  if (!source) throw ApiError.notFound("Post not found");
+  if (source.specialistId === userId) {
+    throw ApiError.badRequest("Own post is edited in place");
+  }
+  const role = await upsertRoleForPost(userId, undefined, {
+    name: source.role.name,
+    pricePerK: source.role.pricePerK ?? undefined,
+    pricePerDay: source.role.pricePerDay ?? undefined,
+  });
+  const taken = await db.smmPost.findUnique({ where: { roleId: role.id } });
+  if (taken) throw ApiError.conflict("This role already has a post");
+  const copy = await db.smmPost.create({
+    data: {
+      specialistId: userId,
+      roleId: role.id,
+      description: source.description,
+      media: (source.media as any) ?? undefined,
+      attachments: (source.attachments as any) ?? undefined,
+      coverColor: source.coverColor,
+      coverIcon: source.coverIcon,
+      isPublic: false, // a VERSION never appears in the community library
+      parentId: source.id,
+    },
+    include: {
+      role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+      specialist: publicUser,
+    },
+  });
+  return copy;
+}
+
+// ── EVENTS ──────────────────────────────────────────────────────────────────
+
+const eventInclude = {
+  customer: publicUser,
+  roles: { select: { id: true, name: true } },
+};
+
+function eventTests(testIds: string[]) {
+  return (testIds || []).length > 0
+    ? db.test.findMany({
+        where: { id: { in: testIds } },
+        select: { id: true, title: true, _count: { select: { questions: true } } },
+      })
+    : Promise.resolve([]);
+}
+
+export async function listEvents(userId: string, scope: string) {
+  const mine = scope !== "public";
+  const rows = await db.smmEvent.findMany({
+    where: mine ? { customerId: userId } : { isPublic: true },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: eventInclude,
+  });
+  const withTests = await Promise.all(
+    rows.map(async (e) => ({ ...e, tests: await eventTests(e.testIds) }))
+  );
+  return { items: withTests };
+}
+
+export async function getEvent(id: string) {
+  const event = await db.smmEvent.findUnique({ where: { id }, include: eventInclude });
+  if (!event) throw ApiError.notFound("Event not found");
+  return { event: { ...event, tests: await eventTests(event.testIds) } };
+}
+
+function eventPayload(userId: string, body: Record<string, unknown>, forCreate: boolean) {
+  const data: Record<string, unknown> = {};
+  const str = (k: string, max: number) =>
+    typeof body[k] === "string" ? (body[k] as string).slice(0, max) : undefined;
+  const title = str("title", 200);
+  if (forCreate && !title?.trim()) throw ApiError.badRequest("Title required");
+  if (title !== undefined) data.title = title.trim() || "Мероприятие";
+  const fields = { summary: 4000, brief: 20000, deadline: 200, budget: 200, restrictions: 4000 } as const;
+  for (const [k, max] of Object.entries(fields)) {
+    const v = str(k, max);
+    if (v !== undefined) data[k] = v;
+  }
+  if (body.format === "online" || body.format === "offline") data.format = body.format;
+  // БИРЖА УСЛУГ: the service category + the barter deal text (blogger tours)
+  if (typeof body.category === "string") {
+    const cat = body.category.slice(0, 40);
+    data.category = ["instagram", "reels", "hotel-review", "photo", "content-plan", "blogger-tour", "other"].includes(cat) ? cat : "other";
+  }
+  if (typeof body.barter === "string") data.barter = body.barter.slice(0, 1000);
+  if (typeof body.platform === "string") data.platform = body.platform.slice(0, 40);
+  if (typeof body.location === "string") data.location = body.location.slice(0, 500);
+  if (typeof body.timeAt === "string") data.timeAt = body.timeAt.slice(0, 200);
+  if (Array.isArray(body.testIds)) {
+    data.testIds = (body.testIds as unknown[]).filter((x) => typeof x === "string").slice(0, 20);
+  }
+  // the editor's «Прикреплённые файлы» section (the test editor's shape)
+  if (body.attachments !== undefined) data.attachments = asAttachments(body.attachments);
+  if (body.coverColor !== undefined) data.coverColor = typeof body.coverColor === "string" ? body.coverColor.slice(0, 32) : null;
+  if (body.coverIcon !== undefined) data.coverIcon = typeof body.coverIcon === "string" ? body.coverIcon.slice(0, 16) : null;
+  if (typeof body.isPublic === "boolean") data.isPublic = body.isPublic;
+  return data;
+}
+
+export async function createEvent(userId: string, body: Record<string, unknown>) {
+  const data = eventPayload(userId, body, true);
+  const event = await db.smmEvent.create({
+    data: { ...(data as any), customerId: userId },
+    include: eventInclude,
+  });
+  return { ...event, tests: await eventTests(event.testIds) };
+}
+
+export async function updateEvent(userId: string, id: string, body: Record<string, unknown>) {
+  const event = await db.smmEvent.findUnique({ where: { id } });
+  if (!event) throw ApiError.notFound("Event not found");
+  if (event.customerId !== userId) throw ApiError.forbidden("Not your event");
+  const data = eventPayload(userId, body, false);
+  // Version rule (the SAME one the tests keep): a VERSION (a copy of
+  // somebody's мероприятие) is NEVER public — the flag is silently coerced
+  // so a stray editor toggle can never leak a version into the public feed.
+  if (event.parentId) data.isPublic = false;
+  const updated = await db.smmEvent.update({ where: { id }, data, include: eventInclude });
+  return { ...updated, tests: await eventTests(updated.testIds) };
+}
+
+export async function deleteEvent(userId: string, id: string) {
+  const event = await db.smmEvent.findUnique({ where: { id } });
+  if (!event) throw ApiError.notFound("Event not found");
+  if (event.customerId !== userId) throw ApiError.forbidden("Not your event");
+  await db.smmEvent.delete({ where: { id } });
+  return { ok: true };
+}
+
+// ── VERSION COPY («Изменить» on somebody else's мероприятие) ────────────────
+// The SAME rule the tests keep (tests.service.copyTest): somebody else's card
+// is NEVER edited in place — the copy is a private VERSION of the original
+// (parentId = the source) that lands in the copier's ЛИЧНАЯ библиотека and
+// opens in the editor. The version keeps the source's exact title, is never
+// public, and carries every attached file / qualification test over.
+export async function copyEvent(userId: string, id: string) {
+  const source = await db.smmEvent.findUnique({ where: { id } });
+  if (!source) throw ApiError.notFound("Event not found");
+  if (source.customerId === userId) {
+    // the owner edits their own event in place — no version is made
+    throw ApiError.badRequest("Own event is edited in place");
+  }
+  const copy = await db.smmEvent.create({
+    data: {
+      customerId: userId,
+      title: source.title,
+      summary: source.summary,
+      brief: source.brief,
+      deadline: source.deadline,
+      budget: source.budget,
+      restrictions: source.restrictions,
+      kind: source.kind,
+      format: source.format,
+      platform: source.platform,
+      location: source.location,
+      timeAt: source.timeAt,
+      testIds: [...source.testIds],
+      attachments: (source.attachments as any) ?? undefined,
+      coverColor: source.coverColor,
+      coverIcon: source.coverIcon,
+      isPublic: false, // a VERSION never appears in the community library
+      parentId: source.id,
+    },
+    include: eventInclude,
+  });
+  return { ...copy, tests: await eventTests(copy.testIds) };
+}
+
+// ── SPECIALISTS (the customer's публичная библиотека) ───────────────────────
+
+export async function listSpecialists() {
+  const users = await db.user.findMany({
+    where: {
+      OR: [{ smmRole: "specialist" }, { smmRoles: { some: {} } }],
+    },
+    select: {
+      id: true, name: true, image: true, smmRating: true, smmRole: true, smmPremium: true,
+      smmRoles: {
+        where: { ownerId: { not: null } },
+        select: { id: true, name: true, pricePerK: true, pricePerDay: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+  // Orders completed = the accepted invitations + applications of the user
+  const ids = users.map((u) => u.id);
+  const [apps, invites, reviewAgg] = await Promise.all([
+    db.smmApplication.groupBy({
+      by: ["specialistId"],
+      where: { specialistId: { in: ids }, status: { in: ["accepted", "completed"] } },
+      _count: { _all: true },
+    }),
+    db.smmInvitation.groupBy({
+      by: ["specialistId"],
+      where: { specialistId: { in: ids }, status: { in: ["accepted", "completed"] } },
+      _count: { _all: true },
+    }),
+    // Отзывы: the REAL star rating (avg of received deal reviews)
+    db.smmReview.groupBy({
+      by: ["targetId"],
+      where: { targetId: { in: ids } },
+      _avg: { rating: true },
+      _count: { _all: true },
+    }),
+  ]);
+  const ordersMap = new Map<string, number>();
+  for (const a of apps) ordersMap.set(a.specialistId, (ordersMap.get(a.specialistId) || 0) + a._count._all);
+  for (const i of invites) ordersMap.set(i.specialistId, (ordersMap.get(i.specialistId) || 0) + i._count._all);
+  const ratingMap = new Map<string, { avg: number | null; count: number }>();
+  for (const r of reviewAgg) {
+    ratingMap.set(r.targetId, {
+      avg: r._avg.rating == null ? null : Math.round(r._avg.rating * 10) / 10,
+      count: r._count._all,
+    });
+  }
+  const items = users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    image: u.image,
+    rating: ratingMap.get(u.id)?.avg ?? 0,
+    reviewsCount: ratingMap.get(u.id)?.count || 0,
+    orders: ordersMap.get(u.id) || 0,
+    roles: u.smmRoles,
+    premium: u.smmPremium,
+  }));
+  return { items };
+}
+
+// ── КАТАЛОГ КОМПАНИЙ (столп 5: the customers side of the catalog) ───────────
+// Every user who CAN place orders: the tourism business with its public card
+// (name/type/city) + the count of their OPEN orders. Specialists browse this
+// catalog to find clients; companies with a filled profile come first.
+export async function listCompanies() {
+  const users = await db.user.findMany({
+    where: { smmRole: "customer" },
+    select: {
+      id: true, name: true, image: true, smmRole: true, createdAt: true,
+      smmPremium: true, smmCompanyName: true, smmCompanyType: true, smmCompanyCity: true,
+      smmHeadline: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+  const ids = users.map((u) => u.id);
+  const openOrders = await db.smmEvent.groupBy({
+    by: ["customerId"],
+    where: { customerId: { in: ids }, isPublic: true, status: "open" },
+    _count: { _all: true },
+  });
+  const ordersMap = new Map<string, number>();
+  for (const o of openOrders) ordersMap.set(o.customerId, o._count._all);
+  // Отзывы: the REAL star rating received by the company from specialists
+  const reviewAgg = await db.smmReview.groupBy({
+    by: ["targetId"],
+    where: { targetId: { in: ids } },
+    _avg: { rating: true },
+    _count: { _all: true },
+  });
+  const ratingMap = new Map<string, { avg: number | null; count: number }>();
+  for (const r of reviewAgg) {
+    ratingMap.set(r.targetId, {
+      avg: r._avg.rating == null ? null : Math.round(r._avg.rating * 10) / 10,
+      count: r._count._all,
+    });
+  }
+  // Companies with a filled profile (name set) rank first, premium on top.
+  const items = users
+    .map((u) => ({
+      id: u.id,
+      name: u.name,
+      image: u.image,
+      premium: u.smmPremium,
+      companyName: u.smmCompanyName || "",
+      companyType: u.smmCompanyType || "",
+      city: u.smmCompanyCity || "",
+      headline: u.smmHeadline || "",
+      openOrders: ordersMap.get(u.id) || 0,
+      rating: ratingMap.get(u.id)?.avg ?? 0,
+      reviewsCount: ratingMap.get(u.id)?.count || 0,
+      filled: !!u.smmCompanyName,
+    }))
+    .sort((a, b) => {
+      if (a.premium !== b.premium) return a.premium ? -1 : 1;
+      if (a.filled !== b.filled) return a.filled ? -1 : 1;
+      return b.openOrders - a.openOrders;
+    });
+  return { items };
+}
+
+// ── PROFILE — the author window opened by tapping a card's author strip ─────
+
+// Everything the profile window needs in ONE fetch: the identity (with the
+// specialist's 4 params when they have roles) + their posts + their PUBLIC
+// events (a customer's personal мероприятия never leak through the profile).
+export async function getSmmProfile(viewerId: string, targetUserId: string) {
+  if (!targetUserId) throw ApiError.badRequest("userId required");
+  const user = await db.user.findUnique({
+    where: { id: targetUserId },
+    select: {
+      id: true, name: true, image: true, smmRating: true, smmRole: true,
+      smmPremium: true, smmCompanyName: true, smmCompanyType: true, smmCompanyCity: true,
+      smmHeadline: true, smmCity: true,
+      smmRoles: {
+        where: { ownerId: targetUserId },
+        select: { id: true, name: true, pricePerK: true, pricePerDay: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+  if (!user) throw ApiError.notFound("User not found");
+  const [apps, invites, posts, events] = await Promise.all([
+    db.smmApplication.count({ where: { specialistId: targetUserId, status: { in: ["accepted", "completed"] } } }),
+    db.smmInvitation.count({ where: { specialistId: targetUserId, status: { in: ["accepted", "completed"] } } }),
+    db.smmPost.findMany({
+      where: { specialistId: targetUserId, isPublic: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: {
+        role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+        specialist: publicUser,
+      },
+    }),
+    db.smmEvent.findMany({
+      where: { customerId: targetUserId, isPublic: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: eventInclude,
+    }),
+  ]);
+  const withTests = await Promise.all(
+    events.map(async (e) => ({ ...e, tests: await eventTests(e.testIds) }))
+  );
+  // Отзывы (Mercur model): the real average + the recent ones for the window
+  const [rAgg, rRows] = await Promise.all([
+    db.smmReview.aggregate({ where: { targetId: targetUserId }, _avg: { rating: true }, _count: { _all: true } }),
+    db.smmReview.findMany({
+      where: { targetId: targetUserId },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      include: { author: { select: { name: true, image: true } } },
+    }),
+  ]);
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      image: user.image,
+      rating: user.smmRating,
+      orders: apps + invites,
+      mode: user.smmRole,
+      roles: user.smmRoles,
+    },
+    reviewAgg: {
+      avg: rAgg._avg.rating == null ? null : Math.round(rAgg._avg.rating * 10) / 10,
+      count: rAgg._count._all,
+    },
+    reviews: rRows.map((r) => ({
+      id: r.id,
+      rating: r.rating,
+      comment: r.comment,
+      createdAt: r.createdAt,
+      authorName: r.author?.name || "",
+      authorImage: r.author?.image || null,
+    })),
+    posts,
+    events: withTests,
+  };
+}
+
+// ── ROLES (my own, for the post editor) ─────────────────────────────────────
+
+export async function listMyRoles(userId: string) {
+  const items = await db.smmRole.findMany({
+    where: { ownerId: userId },
+    select: { id: true, name: true, pricePerK: true, pricePerDay: true, ownerId: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return { items };
+}
+
+export async function deleteRole(userId: string, id: string) {
+  const role = await db.smmRole.findUnique({ where: { id } });
+  if (!role) throw ApiError.notFound("Role not found");
+  if (role.ownerId !== userId) throw ApiError.forbidden("Not your role");
+  await db.smmRole.delete({ where: { id } });
+  return { ok: true };
+}
+
+// ── ЗАЯВКИ / ПРИГЛАШЕНИЯ + the direct chat message ──────────────────────────
+
+async function directChatBetween(a: string, b: string) {
+  const [x, y] = a < b ? [a, b] : [b, a];
+  const found = await db.smmChat.findFirst({
+    where: { kind: "direct", aId: x, bId: y },
+  });
+  if (found) return found;
+  return db.smmChat.create({ data: { kind: "direct", aId: x, bId: y, title: "" } });
+}
+
+async function postSystemMessage(chatId: string, userId: string, userName: string, text: string) {
+  await db.smmChatMessage.create({
+    data: { scopeType: "chat", scopeId: chatId, userId, userName, text, kind: "system" },
+  });
+  await db.smmChat.update({ where: { id: chatId }, data: { lastMessageAt: new Date() } });
+}
+
+export async function createApplication(
+  userId: string,
+  userName: string,
+  body: {
+    eventId: string;
+    roleId: string;
+    score?: number;
+    totalQuestions?: number;
+    proofUrl?: string;
+    proofNote?: string;
+  }
+) {
+  // 400 (not a raw Prisma 500) when ids are missing — the API never lets a
+  // malformed payload reach the database.
+  if (!body?.eventId || !body?.roleId) throw ApiError.badRequest("eventId and roleId required");
+  const event = await db.smmEvent.findUnique({ where: { id: body.eventId } });
+  if (!event) throw ApiError.notFound("Event not found");
+  const role = await db.smmRole.findUnique({ where: { id: body.roleId } });
+  if (!role || role.ownerId !== userId) throw ApiError.badRequest("Choose your own role");
+  const dup = await db.smmApplication.findFirst({
+    where: { eventId: event.id, roleId: role.id, specialistId: userId, status: "pending" },
+  });
+  if (dup) throw ApiError.conflict("Already applied");
+  // ЗАЯВКА БЕЗ ТЕСТА: the specialist attaches a LINK to a video / post with
+  // the ad (Instagram / TikTok / YouTube — the platform the event's ТЗ
+  // names). The link is REQUIRED; the score fields stay for legacy rows.
+  const proofUrl = String(body.proofUrl || "").trim().slice(0, 500);
+  if (!/^https?:\/\/\S+\.?/i.test(proofUrl)) {
+    throw ApiError.badRequest("proofUrl must be a valid http(s) link to the ad post/video");
+  }
+  const proofNote = String(body.proofNote || "").trim().slice(0, 1000);
+  const app = await db.smmApplication.create({
+    data: {
+      eventId: event.id,
+      roleId: role.id,
+      specialistId: userId,
+      proofUrl,
+      proofNote,
+      score: Math.max(0, Math.min(9999, Number(body.score) || 0)),
+      totalQuestions: Math.max(0, Math.min(9999, Number(body.totalQuestions) || 0)),
+      status: "pending",
+    },
+  });
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const chat = await directChatBetween(userId, event.customerId);
+  await postSystemMessage(
+    chat.id,
+    userId,
+    me?.name || userName,
+    `ЗАЯВКА · «${event.title}» · роль «${role.name}» · реклама: ${proofUrl}${proofNote ? ` · ${proofNote}` : ""}`
+  );
+  return app;
+}
+
+export async function listMyApplications(userId: string) {
+  // BOTH DIRECTIONS: the specialist sees the заявки they sent, the customer
+  // sees the заявки that arrived for THEIR events (the same window serves
+  // both roles — an application is visible to both its parties at once).
+  const rows = await db.smmApplication.findMany({
+    where: { OR: [{ specialistId: userId }, { event: { customerId: userId } }] },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: {
+      event: { select: { id: true, title: true, customerId: true, customer: { select: { name: true } } } },
+      role: { select: { id: true, name: true } },
+      specialist: { select: { name: true } },
+      reviews: { where: { authorId: userId }, select: { rating: true, comment: true } },
+    },
+  });
+  const items = rows.map((a) => {
+    const sent = a.specialistId === userId;
+    const myReview = a.reviews?.[0] || null;
+    return {
+      id: a.id,
+      kind: "application" as const,
+      status: a.status,
+      createdAt: a.createdAt,
+      score: a.score,
+      totalQuestions: a.totalQuestions,
+      proofUrl: a.proofUrl,
+      proofNote: a.proofNote,
+      completedByCustomer: a.completedByCustomer,
+      completedBySpecialist: a.completedBySpecialist,
+      myReview: myReview ? { rating: myReview.rating, comment: myReview.comment } : null,
+      eventId: a.event.id,
+      eventTitle: a.event.title,
+      roleId: a.role.id,
+      roleName: a.role.name,
+      counterpartyName: sent ? (a.event.customer?.name || "") : (a.specialist?.name || ""),
+      direction: sent ? ("sent" as const) : ("incoming" as const),
+    };
+  });
+  return { items };
+}
+
+export async function withdrawApplication(userId: string, id: string) {
+  const app = await db.smmApplication.findUnique({ where: { id } });
+  if (!app) throw ApiError.notFound("Application not found");
+  if (app.specialistId !== userId) throw ApiError.forbidden("Not your application");
+  if (app.status !== "pending") throw ApiError.conflict("Only pending requests can be withdrawn");
+  await db.smmApplication.delete({ where: { id } });
+  return { ok: true };
+}
+
+export async function createInvitation(
+  userId: string,
+  userName: string,
+  body: { specialistId: string; eventId: string; roleId: string; estimate?: number | null }
+) {
+  // 400 (not a raw Prisma 500) when ids are missing.
+  if (!body?.specialistId || !body?.eventId || !body?.roleId) throw ApiError.badRequest("specialistId, eventId and roleId required");
+  const event = await db.smmEvent.findUnique({ where: { id: body.eventId } });
+  if (!event) throw ApiError.notFound("Event not found");
+  if (event.customerId !== userId) throw ApiError.forbidden("Not your event");
+  const role = await db.smmRole.findUnique({ where: { id: body.roleId } });
+  if (!role || role.ownerId !== body.specialistId) throw ApiError.badRequest("Choose the specialist's role");
+  const dup = await db.smmInvitation.findFirst({
+    where: { eventId: event.id, roleId: role.id, specialistId: body.specialistId, customerId: userId, status: "pending" },
+  });
+  if (dup) throw ApiError.conflict("Already invited");
+  const inv = await db.smmInvitation.create({
+    data: {
+      eventId: event.id,
+      roleId: role.id,
+      customerId: userId,
+      specialistId: body.specialistId,
+      estimate: body.estimate == null ? null : Number(body.estimate),
+      status: "pending",
+    },
+  });
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const chat = await directChatBetween(userId, body.specialistId);
+  await postSystemMessage(
+    chat.id,
+    userId,
+    me?.name || userName,
+    `ПРИГЛАШЕНИЕ · «${event.title}» · роль «${role.name}»${inv.estimate != null ? ` · примерная сумма: ${inv.estimate}` : ""}`
+  );
+  return inv;
+}
+
+export async function listMyInvitations(userId: string) {
+  // BOTH DIRECTIONS: the customer sees the приглашения they sent, the
+  // specialist sees the ones that arrived for THEM (one window for both).
+  const rows = await db.smmInvitation.findMany({
+    where: { OR: [{ customerId: userId }, { specialistId: userId }] },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: {
+      event: { select: { id: true, title: true } },
+      role: { select: { id: true, name: true } },
+      specialist: { select: { name: true } },
+      customer: { select: { name: true } },
+      reviews: { where: { authorId: userId }, select: { rating: true, comment: true } },
+    },
+  });
+  const items = rows.map((i) => {
+    const sent = i.customerId === userId;
+    const myReview = i.reviews?.[0] || null;
+    return {
+      id: i.id,
+      kind: "invitation" as const,
+      status: i.status,
+      createdAt: i.createdAt,
+      estimate: i.estimate,
+      completedByCustomer: i.completedByCustomer,
+      completedBySpecialist: i.completedBySpecialist,
+      myReview: myReview ? { rating: myReview.rating, comment: myReview.comment } : null,
+      eventId: i.event.id,
+      eventTitle: i.event.title,
+      roleId: i.role.id,
+      roleName: i.role.name,
+      counterpartyName: sent ? (i.specialist?.name || "") : (i.customer?.name || ""),
+      direction: sent ? ("sent" as const) : ("incoming" as const),
+    };
+  });
+  return { items };
+}
+
+export async function withdrawInvitation(userId: string, id: string) {
+  const inv = await db.smmInvitation.findUnique({ where: { id } });
+  if (!inv) throw ApiError.notFound("Invitation not found");
+  if (inv.customerId !== userId) throw ApiError.forbidden("Not your invitation");
+  if (inv.status !== "pending") throw ApiError.conflict("Only pending requests can be withdrawn");
+  await db.smmInvitation.delete({ where: { id } });
+  return { ok: true };
+}
+
+// ── DEAL LIFECYCLE + REVIEWS — adopted from the Mercur/Sharetribe marketplace
+// model: accept → both-side completion → reviews. This closes the missing
+// logical step: statuses are no longer permanently «pending».
+
+/** The customer decides a specialist's заявка (accept = the deal starts). */
+export async function decideApplication(userId: string, id: string, decision: string) {
+  if (decision !== "accepted" && decision !== "declined") throw ApiError.badRequest("decision must be accepted or declined");
+  const app = await db.smmApplication.findUnique({
+    where: { id },
+    include: { event: { select: { id: true, title: true, customerId: true } }, role: { select: { name: true } } },
+  });
+  if (!app) throw ApiError.notFound("Application not found");
+  if (app.event.customerId !== userId) throw ApiError.forbidden("Only the customer can decide");
+  if (app.status !== "pending") throw ApiError.conflict("Already decided");
+  const updated = await db.smmApplication.update({ where: { id }, data: { status: decision } });
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const chat = await directChatBetween(app.specialistId, app.event.customerId);
+  await postSystemMessage(
+    chat.id,
+    userId,
+    me?.name || "",
+    `ЗАЯВКА ${decision === "accepted" ? "ПРИНЯТА — сделка началась" : "ОТКЛОНЕНА"} · «${app.event.title}» · роль «${app.role.name}»`
+  );
+  await telegramNotify(
+    decision === "accepted"
+      ? `🤝 Сделка началась: «${app.event.title}» · роль «${app.role.name}»`
+      : `✖ Заявка отклонена: «${app.event.title}» · роль «${app.role.name}»`
+  );
+  return updated;
+}
+
+/** The specialist decides an incoming приглашение (accept = the deal starts). */
+export async function decideInvitation(userId: string, id: string, decision: string) {
+  if (decision !== "accepted" && decision !== "declined") throw ApiError.badRequest("decision must be accepted or declined");
+  const inv = await db.smmInvitation.findUnique({
+    where: { id },
+    include: { event: { select: { id: true, title: true } }, role: { select: { name: true } } },
+  });
+  if (!inv) throw ApiError.notFound("Invitation not found");
+  if (inv.specialistId !== userId) throw ApiError.forbidden("Only the invited specialist can decide");
+  if (inv.status !== "pending") throw ApiError.conflict("Already decided");
+  const updated = await db.smmInvitation.update({ where: { id }, data: { status: decision } });
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const chat = await directChatBetween(inv.customerId, inv.specialistId);
+  await postSystemMessage(
+    chat.id,
+    userId,
+    me?.name || "",
+    `ПРИГЛАШЕНИЕ ${decision === "accepted" ? "ПРИНЯТО — сделка началась" : "ОТКЛОНЕНО"} · «${inv.event.title}» · роль «${inv.role.name}»`
+  );
+  await telegramNotify(
+    decision === "accepted"
+      ? `🤝 Сделка началась (приглашение): «${inv.event.title}» · роль «${inv.role.name}»`
+      : `✖ Приглашение отклонено: «${inv.event.title}» · роль «${inv.role.name}»`
+  );
+  return updated;
+}
+
+/**
+ * АВТОПОСТ ПОСЛЕ ВЫПОЛНЕНИЯ ЗАДАЧИ — when BOTH sides confirm the deal, the
+ * system writes a post into the specialist's ЛИЧНАЯ библиотека (the
+ * «автоматически созданные системой посты»). One post per role
+ * (@@unique(roleId)): the FIRST completion creates the auto post; later
+ * completions of the same role APPEND their task line to its description,
+ * so the post becomes the role's work log. The ad link rides along as a
+ * link attachment. Never throws — a failure here must not break the deal.
+ */
+async function ensureDealPost(opts: {
+  specialistId: string;
+  roleId: string;
+  eventTitle: string;
+  proofUrl?: string;
+  proofNote?: string;
+  via: "application" | "invitation";
+}) {
+  const line = [
+    `✅ Задача выполнена — заказ «${opts.eventTitle}»${opts.via === "invitation" ? " (по приглашению)" : ""}.`,
+    opts.proofUrl ? `Реклама: ${opts.proofUrl}` : "",
+    opts.proofNote ? `Примечание: ${opts.proofNote}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const existing = await db.smmPost.findUnique({ where: { roleId: opts.roleId } });
+  if (!existing) {
+    await db.smmPost.create({
+      data: {
+        specialistId: opts.specialistId,
+        roleId: opts.roleId,
+        description: `Пост создан автоматически после выполнения задачи.\n${line}`,
+        attachments: opts.proofUrl
+          ? ([{ title: "Реклама", type: "link", url: opts.proofUrl }] as any)
+          : undefined,
+        isPublic: false, // the personal library — publishing stays manual
+        autoGenerated: true,
+      },
+    });
+    return;
+  }
+  // the role already has a post (manual or an earlier auto post) — append
+  // the completed task as a new log line; idempotent per deal.
+  const desc = existing.description || "";
+  if (desc.includes(line)) return;
+  await db.smmPost.update({
+    where: { id: existing.id },
+    data: { description: `${desc}${desc ? "\n\n" : ""}${line}` },
+  });
+}
+
+/**
+ * One side confirms the deal is done. When BOTH sides have confirmed, the
+ * deal flips to «completed» — that unlocks the reviews for this deal and
+ * the system writes the АВТОПОСТ into the specialist's personal library.
+ */
+export async function completeDeal(userId: string, dealType: string, dealId: string) {
+  if (dealType !== "application" && dealType !== "invitation") throw ApiError.badRequest("dealType must be application or invitation");
+  if (dealType === "application") {
+    const app = await db.smmApplication.findUnique({
+      where: { id: dealId },
+      include: { event: { select: { title: true, customerId: true } }, role: { select: { name: true } } },
+    });
+    if (!app) throw ApiError.notFound("Deal not found");
+    const isCustomer = app.event.customerId === userId;
+    const isSpecialist = app.specialistId === userId;
+    if (!isCustomer && !isSpecialist) throw ApiError.forbidden("Not your deal");
+    if (app.status !== "accepted") throw ApiError.conflict("Deal is not active");
+    const mineDone = isCustomer ? app.completedByCustomer : app.completedBySpecialist;
+    if (mineDone) throw ApiError.conflict("Already confirmed");
+    const otherDone = isCustomer ? app.completedBySpecialist : app.completedByCustomer;
+    const data = otherDone
+      ? { [isCustomer ? "completedByCustomer" : "completedBySpecialist"]: true, status: "completed", completedAt: new Date() }
+      : { [isCustomer ? "completedByCustomer" : "completedBySpecialist"]: true };
+    const updated = await db.smmApplication.update({ where: { id: app.id }, data });
+    const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+    const chat = await directChatBetween(app.specialistId, app.event.customerId);
+    await postSystemMessage(
+      chat.id,
+      userId,
+      me?.name || "",
+      otherDone
+        ? `СДЕЛКА ЗАВЕРШЕНА · «${app.event.title}» · роль «${app.role.name}» · в личной библиотеке специалиста создан автопост · можно оставить отзыв`
+        : `СТОРОНА ПОДТВЕРДИЛА ВЫПОЛНЕНИЕ (1/2) · «${app.event.title}»`
+    );
+    if (otherDone) {
+      await telegramNotify(`✅ Сделка завершена: «${app.event.title}» · роль «${app.role.name}»`);
+      // the system post lands in the specialist's personal library
+      try {
+        await ensureDealPost({
+          specialistId: app.specialistId,
+          roleId: app.roleId,
+          eventTitle: app.event.title,
+          proofUrl: app.proofUrl || undefined,
+          proofNote: app.proofNote || undefined,
+          via: "application",
+        });
+      } catch { /* the deal stays completed even if the auto post fails */ }
+    }
+    return updated;
+  }
+  const inv = await db.smmInvitation.findUnique({
+    where: { id: dealId },
+    include: { event: { select: { title: true } }, role: { select: { name: true } } },
+  });
+  if (!inv) throw ApiError.notFound("Deal not found");
+  const isCustomer = inv.customerId === userId;
+  const isSpecialist = inv.specialistId === userId;
+  if (!isCustomer && !isSpecialist) throw ApiError.forbidden("Not your deal");
+  if (inv.status !== "accepted") throw ApiError.conflict("Deal is not active");
+  const mineDone = isCustomer ? inv.completedByCustomer : inv.completedBySpecialist;
+  if (mineDone) throw ApiError.conflict("Already confirmed");
+  const otherDone = isCustomer ? inv.completedBySpecialist : inv.completedByCustomer;
+  const data = otherDone
+    ? { [isCustomer ? "completedByCustomer" : "completedBySpecialist"]: true, status: "completed", completedAt: new Date() }
+    : { [isCustomer ? "completedByCustomer" : "completedBySpecialist"]: true };
+  const updated = await db.smmInvitation.update({ where: { id: inv.id }, data });
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const chat = await directChatBetween(inv.customerId, inv.specialistId);
+  await postSystemMessage(
+    chat.id,
+    userId,
+    me?.name || "",
+    otherDone
+      ? `СДЕЛКА ЗАВЕРШЕНА · «${inv.event.title}» · роль «${inv.role.name}» · в личной библиотеке специалиста создан автопост · можно оставить отзыв`
+      : `СТОРОНА ПОДТВЕРДИЛА ВЫПОЛНЕНИЕ (1/2) · «${inv.event.title}»`
+  );
+  if (otherDone) {
+    await telegramNotify(`✅ Сделка завершена: «${inv.event.title}» · роль «${inv.role.name}»`);
+    // the system post lands in the specialist's personal library
+    try {
+      await ensureDealPost({
+        specialistId: inv.specialistId,
+        roleId: inv.roleId,
+        eventTitle: inv.event.title,
+        via: "invitation",
+      });
+    } catch { /* the deal stays completed even if the auto post fails */ }
+  }
+  return updated;
+}
+
+/** Leave a review on a COMPLETED deal — each side reviews the other. */
+export async function createReview(
+  userId: string,
+  body: { dealType: string; dealId: string; rating: number; comment?: string }
+) {
+  if (body?.dealType !== "application" && body?.dealType !== "invitation") throw ApiError.badRequest("dealType must be application or invitation");
+  if (!body?.dealId) throw ApiError.badRequest("dealId required");
+  const ratingNum = Number(body.rating);
+  if (!ratingNum || ratingNum < 1 || ratingNum > 5) throw ApiError.badRequest("rating must be 1..5");
+  const rating = Math.round(ratingNum);
+  const comment = String(body.comment || "").slice(0, 1000).trim();
+  if (body.dealType === "application") {
+    const app = await db.smmApplication.findUnique({
+      where: { id: body.dealId },
+      include: { event: { select: { id: true, title: true, customerId: true } } },
+    });
+    if (!app) throw ApiError.notFound("Deal not found");
+    if (app.status !== "completed") throw ApiError.conflict("Deal is not completed yet");
+    const isCustomer = app.event.customerId === userId;
+    const isSpecialist = app.specialistId === userId;
+    if (!isCustomer && !isSpecialist) throw ApiError.forbidden("Not your deal");
+    const dup = await db.smmReview.findFirst({ where: { dealType: "application", dealId: app.id, authorId: userId } });
+    if (dup) throw ApiError.conflict("You already reviewed this deal");
+    const review = await db.smmReview.create({
+      data: {
+        dealType: "application",
+        dealId: app.id,
+        applicationId: app.id,
+        eventId: app.eventId,
+        authorId: userId,
+        targetId: isCustomer ? app.specialistId : app.event.customerId,
+        rating,
+        comment,
+      },
+    });
+    await telegramNotify(`⭐ Новый отзыв ${rating}/5 на сделку «${app.event.title}»`);
+    return review;
+  }
+  const inv = await db.smmInvitation.findUnique({
+    where: { id: body.dealId },
+    include: { event: { select: { id: true, title: true } } },
+  });
+  if (!inv) throw ApiError.notFound("Deal not found");
+  if (inv.status !== "completed") throw ApiError.conflict("Deal is not completed yet");
+  const isCustomer = inv.customerId === userId;
+  const isSpecialist = inv.specialistId === userId;
+  if (!isCustomer && !isSpecialist) throw ApiError.forbidden("Not your deal");
+  const dup = await db.smmReview.findFirst({ where: { dealType: "invitation", dealId: inv.id, authorId: userId } });
+  if (dup) throw ApiError.conflict("You already reviewed this deal");
+  const review = await db.smmReview.create({
+    data: {
+      dealType: "invitation",
+      dealId: inv.id,
+      invitationId: inv.id,
+      eventId: inv.eventId,
+      authorId: userId,
+      targetId: isCustomer ? inv.specialistId : inv.customerId,
+      rating,
+      comment,
+    },
+  });
+  await telegramNotify(`⭐ Новый отзыв ${rating}/5 на сделку «${inv.event.title}»`);
+  return review;
+}
+
+/** Отзывы received by a user (the profile «Отзывы» block + the catalog). */
+export async function listUserReviews(userId: string) {
+  const [rows, agg] = await Promise.all([
+    db.smmReview.findMany({
+      where: { targetId: userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      include: { author: { select: { name: true, image: true } } },
+    }),
+    db.smmReview.aggregate({ where: { targetId: userId }, _avg: { rating: true }, _count: { _all: true } }),
+  ]);
+  return {
+    avg: agg._avg.rating == null ? null : Math.round(agg._avg.rating * 10) / 10,
+    count: agg._count._all,
+    items: rows.map((r) => ({
+      id: r.id,
+      rating: r.rating,
+      comment: r.comment,
+      createdAt: r.createdAt,
+      authorName: r.author?.name || "",
+      authorImage: r.author?.image || null,
+    })),
+  };
+}
+
+// ── SMM BOOKMARKS (закладки window) ─────────────────────────────────────────
+
+export async function listSmmBookmarks(userId: string) {
+  const rows = await db.smmBookmark.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+  const eventIds = rows.filter((r) => r.targetType === "event").map((r) => r.targetId);
+  const specialistIds = rows.filter((r) => r.targetType === "specialist").map((r) => r.targetId);
+  const postIds = rows.filter((r) => r.targetType === "post").map((r) => r.targetId);
+  const [events, users, posts] = await Promise.all([
+    eventIds.length
+      ? db.smmEvent.findMany({ where: { id: { in: eventIds } }, include: eventInclude })
+      : Promise.resolve([]),
+    specialistIds.length
+      ? db.user.findMany({
+          where: { id: { in: specialistIds } },
+          select: { id: true, name: true, image: true, smmRating: true, smmRoles: { where: { ownerId: { not: null } }, select: { id: true, name: true, pricePerK: true, pricePerDay: true, createdAt: true } } },
+        })
+      : Promise.resolve([]),
+    postIds.length
+      ? db.smmPost.findMany({
+          where: { id: { in: postIds } },
+          include: { role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } }, specialist: publicUser },
+        })
+      : Promise.resolve([]),
+  ]);
+  const evMap = new Map(events.map((e) => [e.id, { ...e, tests: [] }] as [string, any]));
+  const spMap = new Map(
+    users.map((u) => [u.id, { id: u.id, name: u.name, image: u.image, rating: u.smmRating, orders: 0, roles: u.smmRoles }] as [string, any])
+  );
+  const poMap = new Map(posts.map((p) => [p.id, p] as [string, any]));
+  const items = rows.map((r) => ({
+    id: r.id,
+    targetType: r.targetType as "event" | "specialist" | "post",
+    targetId: r.targetId,
+    createdAt: r.createdAt,
+    event: evMap.get(r.targetId) || null,
+    specialist: spMap.get(r.targetId) || null,
+    post: poMap.get(r.targetId) || null,
+  }));
+  return { items };
+}
+
+export async function addSmmBookmark(userId: string, targetType: string, targetId: string) {
+  if (!["event", "specialist", "post"].includes(targetType)) throw ApiError.badRequest("Bad target");
+  const row = await db.smmBookmark.upsert({
+    where: { userId_targetType_targetId: { userId, targetType, targetId } },
+    create: { userId, targetType, targetId },
+    update: {},
+  });
+  return row;
+}
+
+export async function removeSmmBookmark(userId: string, targetType: string, targetId: string) {
+  await db.smmBookmark.deleteMany({ where: { userId, targetType, targetId } });
+  return { ok: true };
+}
+
+// ── CHATS (чат window) ──────────────────────────────────────────────────────
+
+export async function listChats(userId: string) {
+  const rows = await db.smmChat.findMany({
+    where: {
+      OR: [
+        { kind: "group" },
+        { kind: "direct", aId: userId },
+        { kind: "direct", bId: userId },
+      ],
+    },
+    orderBy: { lastMessageAt: "desc" },
+    take: 100,
+    include: { owner: publicUser },
+  });
+  // Last message per chat + the direct peer
+  const ids = rows.map((r) => r.id);
+  const lasts = ids.length
+    ? await db.smmChatMessage.findMany({
+        where: { scopeType: "chat", scopeId: { in: ids } },
+        orderBy: { createdAt: "desc" },
+        take: ids.length * 3,
+        select: { scopeId: true, text: true, createdAt: true },
+      })
+    : [];
+  const lastMap = new Map<string, string>();
+  for (const m of lasts) if (!lastMap.has(m.scopeId)) lastMap.set(m.scopeId, m.text);
+  const items = rows.map((c) => {
+    const peerId = c.kind === "direct" ? (c.aId === userId ? c.bId : c.aId) : null;
+    const peer = peerId ? null : null; // resolved below
+    return { ...c, lastMessage: lastMap.get(c.id) || null, peer, peerId };
+  });
+  // resolve peers in one query
+  const peerIds = items.map((i: any) => i.peerId).filter(Boolean) as string[];
+  const peers = peerIds.length
+    ? await db.user.findMany({ where: { id: { in: peerIds } }, select: { id: true, name: true, image: true } })
+    : [];
+  const peerMap = new Map(peers.map((p) => [p.id, p] as [string, any]));
+  return {
+    items: items.map((c: any) => ({
+      id: c.id,
+      kind: c.kind,
+      title: c.kind === "direct" ? peerMap.get(c.peerId)?.name || "Диалог" : c.title || "Чат",
+      ownerId: c.ownerId,
+      lastMessageAt: c.lastMessageAt,
+      lastMessage: c.lastMessage,
+      peer: c.peerId ? peerMap.get(c.peerId) || null : null,
+    })),
+  };
+}
+
+export async function createChat(userId: string, title: string, peerId?: string) {
+  // Direct dialog: find-or-create by the ordered pair (a<b) — used by the
+  // «Чат» button on event/post/specialist cards.
+  if (peerId && peerId !== userId) {
+    const [a, b] = userId < peerId ? [userId, peerId] : [peerId, userId];
+    const found = await db.smmChat.findFirst({ where: { kind: "direct", aId: a, bId: b } });
+    if (found) return found;
+    return db.smmChat.create({ data: { kind: "direct", aId: a, bId: b, title: "" } });
+  }
+  const t = title.trim();
+  if (!t) throw ApiError.badRequest("Title required");
+  return db.smmChat.create({ data: { kind: "group", title: t.slice(0, 120), ownerId: userId } });
+}
+
+export async function renameChat(userId: string, id: string, title: string) {
+  const chat = await db.smmChat.findUnique({ where: { id } });
+  if (!chat) throw ApiError.notFound("Chat not found");
+  if (chat.ownerId !== userId) throw ApiError.forbidden("Not your chat");
+  const t = title.trim();
+  if (!t) throw ApiError.badRequest("Title required");
+  return db.smmChat.update({ where: { id }, data: { title: t.slice(0, 120) } });
+}
+
+export async function deleteChat(userId: string, id: string) {
+  const chat = await db.smmChat.findUnique({ where: { id } });
+  if (!chat) throw ApiError.notFound("Chat not found");
+  if (chat.ownerId !== userId) throw ApiError.forbidden("Not your chat");
+  await db.smmChatMessage.deleteMany({ where: { scopeType: "chat", scopeId: id } });
+  await db.smmChat.delete({ where: { id } });
+  return { ok: true };
+}
+
+export async function listChatMessages(userId: string, chatId: string, after?: string) {
+  const chat = await db.smmChat.findUnique({ where: { id: chatId } });
+  if (!chat) throw ApiError.notFound("Chat not found");
+  const messages = await db.smmChatMessage.findMany({
+    where: {
+      scopeType: "chat",
+      scopeId: chatId,
+      ...(after ? { createdAt: { gt: new Date(after) } } : {}),
+    },
+    orderBy: { createdAt: "asc" },
+    take: 300,
+  });
+  return { messages };
+}
+
+export async function sendChatMessage(userId: string, chatId: string, text: string) {
+  const chat = await db.smmChat.findUnique({ where: { id: chatId } });
+  if (!chat) throw ApiError.notFound("Chat not found");
+  const t = text.trim();
+  if (!t) throw ApiError.badRequest("Empty message");
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const msg = await db.smmChatMessage.create({
+    data: { scopeType: "chat", scopeId: chatId, userId, userName: me?.name || "?", text: t.slice(0, 4000), kind: "text" },
+  });
+  await db.smmChat.update({ where: { id: chatId }, data: { lastMessageAt: new Date() } });
+  return msg;
+}
+
+// ── CARD CHAT («Чат» on every card — the test-card group-chat mechanic) ─────
+// Everyone's chat about THIS card: messages live in SmmChatMessage with
+// scopeType = "event" | "post" | "specialist" and scopeId = the card id —
+// the same per-subject scope contract the schema was designed around.
+
+const CARD_SCOPES = ["event", "post", "specialist"] as const;
+
+async function assertCardScope(scopeType: string, scopeId: string) {
+  if (!(CARD_SCOPES as readonly string[]).includes(scopeType)) throw ApiError.badRequest("Bad scope");
+  if (scopeType === "event") {
+    const e = await db.smmEvent.findUnique({ where: { id: scopeId }, select: { id: true } });
+    if (!e) throw ApiError.notFound("Event not found");
+  } else if (scopeType === "post") {
+    const p = await db.smmPost.findUnique({ where: { id: scopeId }, select: { id: true } });
+    if (!p) throw ApiError.notFound("Post not found");
+  } else {
+    const u = await db.user.findUnique({ where: { id: scopeId }, select: { id: true } });
+    if (!u) throw ApiError.notFound("User not found");
+  }
+}
+
+export async function listCardChat(userId: string, scopeType: string, scopeId: string) {
+  await assertCardScope(scopeType, scopeId);
+  const messages = await db.smmChatMessage.findMany({
+    where: { scopeType, scopeId },
+    orderBy: { createdAt: "asc" },
+    take: 300,
+  });
+  return { messages };
+}
+
+export async function sendCardChat(userId: string, scopeType: string, scopeId: string, text: string) {
+  await assertCardScope(scopeType, scopeId);
+  const t = text.trim();
+  if (!t) throw ApiError.badRequest("Empty message");
+  const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  return db.smmChatMessage.create({
+    data: { scopeType, scopeId, userId, userName: me?.name || "?", text: t.slice(0, 4000), kind: "text" },
+  });
+}
+
+// ── SPECIALIST CARD DELETE («Удалить» on the специалист card) ───────────────
+// A specialist card IS the user's marketplace presence: deleting your own
+// card removes your personal price-list roles (the ones without posts — a
+// role with a post must be cleared via its post first) and drops the
+// «specialist» flag, so the card leaves the публичная библиотека. Somebody
+// else's card is refused — the same owner-guard the test deletes keep.
+export async function deleteSpecialistCard(userId: string, id: string) {
+  if (id !== userId) throw ApiError.forbidden("Not your card");
+  const roles = await db.smmRole.findMany({
+    where: { ownerId: userId },
+    select: { id: true, name: true, _count: { select: { posts: true } } },
+  });
+  const withPosts = roles.filter((r) => r._count.posts > 0);
+  if (withPosts.length > 0) {
+    throw ApiError.badRequest("Remove the posts of these roles first: " + withPosts.map((r) => r.name).join(", "));
+  }
+  await db.smmRole.deleteMany({ where: { ownerId: userId } });
+  await db.user.updateMany({ where: { id: userId, smmRole: "specialist" }, data: { smmRole: "customer" } });
+  return { ok: true };
+}

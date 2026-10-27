@@ -1,0 +1,385 @@
+@import "tailwindcss";
+/* Motion primitives for animate-in / animate-out (enter + exit animations).
+   Without this import every animate-in class in the codebase was inert —
+   sheets, dialogs and dropdowns popped in and out instantly. */
+@import "tw-animate-css";
+
+/*
+  Design system adopted from adrianhajdin/saas-app (AI Study Companion LMS)
+  - primary accent  : #fe5933 (orange)
+  - dark CTA        : #2c2c2c (charcoal)
+  - gold highlight  : #fccc41
+  - background      : #f9f9f9
+  - font            : Bricolage Grotesque
+  - cards           : very rounded (rounded-4xl) with thin black borders
+*/
+
+:root {
+  --primary: #fe5933;
+  --primary-foreground: #ffffff;
+  --cta: #2c2c2c;
+  --cta-gold: #fccc41;
+  --background: #f9f9f9;
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: #fe5933;
+  --radius: 0.625rem;
+  --chart-1: #fe5933;
+  --chart-2: #fccc41;
+  --chart-3: #2c2c2c;
+  --chart-4: #7dd8a5;
+  --chart-5: #f2a2c0;
+  --sidebar-background: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: #fe5933;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: #fe5933;
+}
+
+.dark {
+  --primary: #fe5933;
+  --primary-foreground: #ffffff;
+  --cta: #fccc41;
+  --cta-gold: #2c2c2c;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: #fe5933;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-cta: var(--cta);
+  --color-cta-gold: var(--cta-gold);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar-background: var(--sidebar-background);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-bricolage: var(--font-bricolage), "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-bricolage), "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  /* Reference-style building blocks */
+  .rounded-border {
+    @apply rounded-4xl border border-black;
+  }
+  .subject-badge {
+    @apply bg-cta text-white rounded-full text-sm px-2.5 py-1 capitalize;
+  }
+  .btn-primary {
+    @apply bg-primary text-white rounded-xl cursor-pointer px-4 py-2 flex items-center gap-2;
+  }
+  .cta-badge {
+    @apply bg-cta-gold rounded-full px-3 py-1.5 text-black;
+  }
+  .styled-input {
+    @apply !border-black !bg-white focus-visible:!ring-[#fe5933] focus-visible:!ring-1 !w-full;
+  }
+}
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 3px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground);
+}
+
+/* KaTeX rendering polish (questions, options, chat, explanations) */
+.katex {
+  font-size: 1.06em;
+}
+.katex-display {
+  margin: 0.3em 0;
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  text-align: center;
+}
+.katex-display > .katex {
+  white-space: nowrap;
+}
+/* Keep display math compact when it appears inside answer option rows */
+.katex-display .katex-html {
+  padding: 0;
+}
+.katex-display {
+  line-height: 1.2;
+}
+
+/* Motion: every view root carries .screen-enter so switching pages fades the
+   new screen in instead of hard-swapping it. Opacity only — no transform, so
+   position:fixed children (bottom bars, sheets) keep their viewport anchor.
+   IMPORTANT: the fade starts at opacity 0.01 (NOT 0) — Chromium excludes
+   content first painted at opacity 0 from FCP/LCP candidates entirely, which
+   would make real-user Core Web Vitals unrecordable. 0.01 is visually
+   identical but fully measurable. */
+.screen-enter {
+  animation: screen-in 280ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes screen-in {
+  from {
+    opacity: 0.01;
+  }
+}
+
+/* Accessibility: honor the OS reduced-motion preference for all UI motion
+   (enter/exit fades, screen fades). Functional spinners (animate-spin/pulse/
+   bounce) keep running. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .animate-out,
+  .screen-enter {
+    animation-duration: 1ms !important;
+  }
+  /* Reduced motion: drop the sweeping glint entirely (a frozen white band
+     would read as a stain on the card); the gray blocks keep their pulse. */
+  .skeleton-mirror::after {
+    animation: none;
+    display: none;
+  }
+  .collapse-motion {
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Smooth accordion-style expand/collapse (grid-rows 0fr -> 1fr trick).
+   Content stays mounted (inert while closed) so nothing pops in or out. */
+.collapse-motion {
+  transition: grid-template-rows 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.collapse-motion > .collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Boot skeleton "mirror" ──────────────────────────────────────────────
+   The first-data skeleton card reads as a glass/mirror plate: the gray
+   blocks pulse while a soft light glint sweeps ACROSS the card and back
+   (animation-direction: alternate — the "туда-сюда" shine). Pure CSS
+   overlay: the card itself still paints fully opaque in the server HTML,
+   so the boot paint stays a valid FCP/LCP candidate. */
+.skeleton-mirror {
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-mirror::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 34%,
+    rgba(255, 255, 255, 0.75) 47%,
+    rgba(255, 255, 255, 0.95) 52%,
+    transparent 66%
+  );
+  transform: translateX(-100%);
+  animation: glint-sweep 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+  pointer-events: none;
+}
+@keyframes glint-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* ── Swiper TikTok feed (dashboard) ──────────────────────────────────────
+   The feed is a vertical Swiper filling the flex column; every slide is one
+   full-height card. Core swiper.css sizes the wrapper; these rules pin the
+   container and slide heights to the flex box so slides never overflow. */
+.feed-swiper {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+.feed-swiper .swiper-wrapper {
+  height: 100%;
+}
+.feed-swiper .swiper-slide {
+  height: 100%;
+}
+
+/* ── Swiper question drum (take-test bottom strip) ────────────────────────
+   Horizontal centered Swiper of w-14 number pills; the magnifier lens is
+   reproduced with watchSlidesProgress transforms (see applyDrumMagnify). */
+.drum-swiper {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+.drum-swiper .swiper-wrapper {
+  height: 100%;
+}
+.drum-swiper .swiper-slide {
+  height: 100%;
+  width: 3.5rem;
+}
+
+/* ══ DESKTOP ADAPTATION (lg = 1024px+) ═══════════════════════════════════
+   The phone UI keeps every mobile pattern (bottom sheets, edge bars); on a
+   desktop the same elements follow desktop interface standards instead:
+   secondary windows are CENTERED FLOATING DIALOGS, bottom bars are FLOATING
+   DOCK PILLS, the library grid shows more, wider-spaced columns. All rules
+   live under the lg media query — phones are pixel-identical to before. */
+
+/* Library/shelf rows: the cards ALWAYS fill the space between the top and
+   the bottom panels, no matter how little text a card carries. The rows are
+   flex items of a definite-height flex column: each row GROWS into the free
+   screen space (flex-grow distributes it equally), so one short card or a
+   couple of small ones still stretch over the whole area. The min-height
+   floor stays for the opposite case — when there are MORE rows than a screen,
+   it keeps the scroll rhythm (≈3 rows per screen on phones, 4 from lg up,
+   5 on ≥1440px monitors) and guarantees a row never clips its tall content. */
+.grid-row-h {
+  flex: 1 0 auto;
+  min-height: max(calc(100% / 3), 20rem);
+}
+@media (min-width: 1024px) {
+  .grid-row-h {
+    min-height: max(calc(100% / 4), 19rem);
+  }
+}
+@media (min-width: 1440px) {
+  .grid-row-h {
+    min-height: max(calc(100% / 5), 18rem);
+  }
+}
+
+/* Bottom sheets (chat, AI tutor, files, edit, naming, register wall) become
+   centered modal dialogs: same panel, re-anchored to the middle of the
+   viewport, height capped for large monitors, fully rounded, floating on a
+   soft shadow. The transform is !important so it wins over the mobile
+   slide-in/slide-out animations — on desktop the dialog fades in place. */
+@media (min-width: 1024px) {
+  .desktop-dialog-panel {
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translateY(-50%) !important;
+    /* Solid desktop dialog width: capped, never edge-to-edge. Callers that
+       pass a narrower max-w keep it (max-width still wins over width). */
+    width: min(calc(100vw - 6rem), 56rem);
+    max-height: min(86dvh, 880px) !important;
+    border-radius: 24px !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  }
+  /* The mobile grab bar is meaningless on a centered dialog. */
+  .desktop-dialog-panel .drag-handle {
+    display: none;
+  }
+
+  /* Bottom bars (dashboard Start, take-test drum, start-test Continue)
+     become floating centered dock pills above the bottom edge. */
+  .desktop-dock {
+    position: fixed;
+    bottom: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(46rem, calc(100vw - 8rem));
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    border-radius: 1.625rem;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+  }
+  .desktop-dock-wide {
+    width: min(64rem, calc(100vw - 8rem));
+  }
+  /* The dashboard's Start bar floats ABOVE the LIBRARY PAGES DOCK (the
+     very-bottom pages pill occupies bottom: 1.25rem with its ~58px height,
+     so the Start pill is lifted above it). Mobile is in-flow stacking —
+     the raise applies on ≥1024px only. */
+  .desktop-dock-raised {
+    bottom: 5.25rem;
+  }
+  /* Legacy SMM dock slots (the SMM dashboard used to stack THREE docks:
+     mode panel / library / context bar). Since SEPARATE REGISTRATION fixed
+     the specialist/customer tab, the mode panel is gone — the SMM view now
+     stacks TWO docks (.desktop-dock + .desktop-dock-raised). The classes
+     stay for future multi-dock screens. */
+  .desktop-dock-mid {
+    bottom: 5.25rem;
+  }
+  .desktop-dock-top {
+    bottom: 9.25rem;
+  }
+}
