@@ -315,6 +315,9 @@ export const api = {
     apiFetch('/smm/sos', { method: 'POST', body: JSON.stringify(data) }) as Promise<{ id: string }>,
   getAdminData: () =>
     apiFetch('/smm/admin/data') as Promise<import('@/lib/app-types').SmmAdminDataT>,
+  // The admin's ticket libraries: pool (public, all admins) + mine (personal)
+  getTicketPool: () =>
+    apiFetch('/smm/sos/pool') as Promise<import('@/lib/app-types').SmmTicketPoolT>,
   adminTicketAction: (id: string, action: 'accept' | 'close') =>
     apiFetch(`/smm/sos/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }) as Promise<{ id: string; status: string }>,
   adminSetBlocked: (id: string, blocked: boolean) =>

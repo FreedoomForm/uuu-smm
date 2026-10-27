@@ -1634,6 +1634,35 @@ export async function listAdminData(userId: string) {
   };
 }
 
+/** The ticket LIBRARIES of an admin (the marketplace docks):
+ * pool = every OPEN ticket — the ПУБЛИЧНАЯ библиотека every admin shares
+ * (the requests under review); mine = the tickets THIS admin accepted —
+ * the ЛИЧНАЯ библиотека. An accepted ticket instantly leaves the pool for
+ * every admin and lives only in the accepting admin's personal library. */
+export async function listTicketPool(userId: string) {
+  await requireAdmin(userId);
+  const shape = { createdBy: { select: { name: true } }, admin: { select: { name: true } } };
+  const [pool, mine] = await Promise.all([
+    db.smmSupportTicket.findMany({ where: { status: "open" }, orderBy: { createdAt: "desc" }, take: 60, include: shape }),
+    db.smmSupportTicket.findMany({ where: { adminId: userId }, orderBy: { updatedAt: "desc" }, take: 60, include: shape }),
+  ]);
+  const map = (t: typeof pool[number]) => ({
+    id: t.id,
+    status: t.status as "open" | "accepted" | "closed",
+    eventTitle: t.eventTitle,
+    peerNames: t.peerNames,
+    reason: t.reason,
+    chatId: t.chatId,
+    dealType: t.dealType,
+    dealId: t.dealId,
+    createdById: t.createdById,
+    createdByName: t.createdBy?.name || "",
+    adminName: t.admin?.name || "",
+    createdAt: t.createdAt,
+  });
+  return { pool: pool.map(map), mine: mine.map(map) };
+}
+
 /** Admin accepts a ticket (enters the chat) or closes it. */
 export async function adminTicketAction(userId: string, id: string, action: string) {
   await requireAdmin(userId);
@@ -1641,17 +1670,23 @@ export async function adminTicketAction(userId: string, id: string, action: stri
   if (!ticket) throw ApiError.notFound("Ticket not found");
   if (action === "accept") {
     if (ticket.status === "closed") throw ApiError.conflict("Ticket closed");
-    const updated = await db.smmSupportTicket.update({
-      where: { id }, data: { status: "accepted", adminId: userId },
+    // ATOMIC claim: the ticket moves to ONE admin's personal library even if
+    // two admins press «Принять» at the same moment — only the update that
+    // finds it still «open» wins, the loser gets a conflict.
+    const claimed = await db.smmSupportTicket.updateMany({
+      where: { id, status: "open" }, data: { status: "accepted", adminId: userId },
     });
+    if (claimed.count === 0) throw ApiError.conflict("Ticket already accepted by another admin");
     const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
     await postSystemMessage(ticket.chatId, userId, me?.name || "", `АДМИН подключился к чату (СОС принят)`);
-    return updated;
+    return { ...ticket, status: "accepted", adminId: userId };
   }
   if (action === "close") {
     const updated = await db.smmSupportTicket.update({
       where: { id }, data: { status: "closed", adminId: ticket.adminId || userId, closedAt: new Date() },
     });
+    const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+    await postSystemMessage(ticket.chatId, userId, me?.name || "", `АДМИН закрыл СОС-запрос`).catch(() => {});
     return updated;
   }
   throw ApiError.badRequest("action must be accept or close");

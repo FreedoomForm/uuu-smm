@@ -369,6 +369,7 @@ export interface SmmTicketT {
   chatId: string;
   dealType: string;
   dealId: string;
+  createdById?: string;
   createdByName: string;
   adminName: string;
   createdAt: string;
@@ -377,6 +378,14 @@ export interface SmmTicketT {
 export interface SmmAdminDataT {
   tickets: SmmTicketT[];
   users: { id: string; name: string; email: string; smmRole: string; isBlocked: boolean; isAdmin: boolean; createdAt: string }[];
+}
+
+// The admin's two ticket LIBRARIES (the marketplace docks): pool = every
+// OPEN ticket (the ПУБЛИЧНАЯ library all admins share), mine = the tickets
+// THIS admin accepted (the ЛИЧНАЯ library — removed from everyone's pool).
+export interface SmmTicketPoolT {
+  pool: SmmTicketT[];
+  mine: SmmTicketT[];
 }
 
 // A review received on the profile («Отзывы» block)

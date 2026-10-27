@@ -43,7 +43,7 @@ import { useNavStore } from '@/stores/nav-store';
 import { useDashboardStore } from '@/stores/dashboard-store';
 import { useProfileStore } from '@/stores/profile-store';
 import { useSmmStore, smmNow, type SmmFilesTarget, type SmmCardChatTarget } from '@/stores/smm-store';
-import type { SmmChatT, SmmEventT, SmmPostT, SmmRequestRowT, SmmRoleT, SmmSpecialistT, SmmProfileT } from '@/lib/app-types';
+import type { SmmChatT, SmmEventT, SmmPostT, SmmRequestRowT, SmmRoleT, SmmSpecialistT, SmmProfileT, SmmTicketT } from '@/lib/app-types';
 
 // The card windows — the SAME panels the test cards open (the dynamic
 // imports keep them out of the first paint, like app-root does):
@@ -82,7 +82,67 @@ import {
 } from './smm-cards';
 import { fmtMoney, mediaSrc, SmmToast } from './smm-bits';
 
-type AnyItem = ({ kind: 'post' } & SmmPostT) | ({ kind: 'event' } & SmmEventT) | ({ kind: 'specialist' } & SmmSpecialistT);
+type AnyItem = ({ kind: 'post' } & SmmPostT) | ({ kind: 'event' } & SmmEventT) | ({ kind: 'specialist' } & SmmSpecialistT) | ({ kind: 'ticket' } & SmmTicketT);
+
+// ── THE СОС-ЗАПРОС CARD (the admin's ticket library) — the same card
+// anatomy the marketplace keeps, but the body is a support request: who
+// pressed СОС (peer names → their profile), the deal title, the reason and
+// the status. The feed/slide variants carry the admin action ladder
+// (Чат → Сделку принять/отклонить → Закрыть), grid keeps it compact.
+function SmmSosTicketCard({ tk, variant, t, onOpen, onOpenProfile, onChat, onCloseTicket, onDealAccept, onDealDecline }: {
+  tk: SmmTicketT;
+  variant: 'grid' | 'shelf' | 'slide' | 'feed';
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  onOpen: () => void;
+  onOpenProfile: () => void;
+  onChat: () => void;
+  onCloseTicket: () => void;
+  onDealAccept: () => void;
+  onDealDecline: () => void;
+}) {
+  const compact = variant === 'grid' || variant === 'shelf';
+  const badge = tk.status === 'open'
+    ? { cls: 'bg-red-100 text-red-600', label: t('smmAdminTicketOpen') }
+    : tk.status === 'accepted'
+      ? { cls: 'bg-[#FFF0D9] text-black/70', label: t('smmAdminTicketAccepted') }
+      : { cls: 'bg-[#DFF3E8] text-cta', label: t('smmAdminTicketClosed') };
+  const when = new Date(tk.createdAt).toLocaleDateString();
+  const actions = !compact && tk.status !== 'closed';
+  return (
+    <div onClick={onOpen} className={compact
+      ? 'h-full min-h-0 rounded-3xl border border-black bg-white p-3 sm:p-4 flex flex-col gap-1.5 text-left cursor-pointer hover:border-black/60 active:scale-[0.99] transition-all overflow-hidden'
+      : 'h-full min-h-0 w-full max-w-md mx-auto lg:max-w-4xl lg:w-full rounded-2xl border bg-white p-4 sm:p-5 lg:p-6 flex flex-col gap-2 text-left cursor-pointer overflow-y-auto'}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-8 h-8 rounded-full bg-red-100 text-destructive flex items-center justify-center shrink-0"><Siren className="w-4 h-4" /></span>
+          <button onClick={e => { e.stopPropagation(); onOpenProfile(); }} className="min-w-0 text-left" title={t('smmViewProfile')}>
+            <span className="block text-sm font-bold truncate hover:underline">{tk.peerNames || tk.createdByName || t('smmTicketTitle')}</span>
+          </button>
+        </div>
+        <Badge variant="secondary" className={`rounded-full text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</Badge>
+      </div>
+      {tk.eventTitle && <p className={`font-bold truncate ${compact ? 'text-xs' : 'text-base lg:text-lg'}`}>«{tk.eventTitle}»</p>}
+      {tk.reason && <p className={`text-muted-foreground whitespace-pre-wrap break-words ${compact ? 'text-xs line-clamp-3' : 'text-sm'}`}>{tk.reason}</p>}
+      <p className="text-[10px] text-muted-foreground pt-1 mt-auto truncate">{tk.createdByName}{tk.adminName ? ` · ${tk.adminName}` : ''} · {when}</p>
+      {actions && (
+        <div className="flex flex-wrap gap-2 pt-1" onClick={e => e.stopPropagation()}>
+          {tk.chatId && (
+            <Button size="sm" onClick={onChat} className="h-8 rounded-full text-xs"><MessageCircle className="w-3.5 h-3.5" /> {t('smmAdminOpenChat')}</Button>
+          )}
+          {tk.status === 'accepted' && (
+            <Button size="sm" variant="outline" onClick={onCloseTicket} className="h-8 rounded-full text-xs border-black/30">{t('smmAdminClose')}</Button>
+          )}
+          {!!tk.dealType && !!tk.dealId && (
+            <>
+              <Button size="sm" variant="outline" onClick={onDealAccept} className="h-8 rounded-full text-xs border-[#DFF3E8] text-cta">{t('smmAdminDealAccept')}</Button>
+              <Button size="sm" variant="outline" onClick={onDealDecline} className="h-8 rounded-full text-xs border-destructive/50 text-destructive">{t('smmAdminDealDecline')}</Button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Desktop (lg+) prev/next controls for the vertical feed — the SAME affordance
 // the tests feed keeps (phones swipe; on desktop the wheel/keys already work,
@@ -175,10 +235,12 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const [clLoading, setClLoading] = useState(false);
   const [clValues, setClValues] = useState<Record<number, string>>({});
   const [clBusy, setClBusy] = useState<number | null>(null);
-  // ── ADMIN window + СОС dialog state
+  // ── ADMIN window + СОС dialog state — the admin's two ticket LIBRARIES
+  // (pool = the ПУБЛИЧНАЯ library all admins share, mine = the ЛИЧНАЯ)
   const [adminData, setAdminData] = useState<import('@/lib/app-types').SmmAdminDataT | null>(null);
   const [adminLoading, setAdminLoading] = useState(false);
-  const [openSosCount, setOpenSosCount] = useState(0);
+  const [ticketPool, setTicketPool] = useState<SmmTicketT[]>([]);
+  const [ticketsMine, setTicketsMine] = useState<SmmTicketT[]>([]);
   const [sosOpen, setSosOpen] = useState(false);
   const [sosReason, setSosReason] = useState('');
   const [sosDeal, setSosDeal] = useState(''); // 'dealType:dealId' | ''
@@ -268,6 +330,18 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     if (!myId) return;
     setListLoading(true);
     try {
+      // THE ADMIN'S MARKETPLACE: the docks turn into the ticket libraries —
+      // the личная holds the requests THIS admin accepted, the публичная the
+      // shared pool of every OPEN request (the same list for all admins).
+      // The accepted ticket leaves the pool for EVERYONE (status !== open).
+      if (isAdminUser) {
+        const pool = await api.getTicketPool().catch(() => ({ pool: [] as SmmTicketT[], mine: [] as SmmTicketT[] }));
+        setTicketPool(pool.pool || []);
+        setTicketsMine(pool.mine || []);
+        const src = personal ? (pool.mine || []) : (pool.pool || []);
+        setItems((src as SmmTicketT[]).map(tk => ({ ...tk, kind: 'ticket' as const })));
+        return;
+      }
       const [posts, events, specialists, roles, evs, bms] = await Promise.all([
         api.getPosts('mine').catch(() => ({ items: [] })),
         api.getEvents('public').catch(() => ({ items: [] })),
@@ -294,7 +368,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     } finally {
       setListLoading(false);
     }
-  }, [myId, isSpecialist, personal]);
+  }, [myId, isSpecialist, personal, isAdminUser]);
 
   useEffect(() => { void loadLists(); }, [loadLists, refreshNonce]);
 
@@ -459,17 +533,21 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     try {
       const r = await api.getAdminData();
       setAdminData(r);
-      setOpenSosCount((r.tickets || []).filter((x: any) => x.status === 'open').length);
     } catch { setAdminData(null); } finally { setAdminLoading(false); }
   }, []);
 
   useEffect(() => {
     if (topWindow === 'admin') { void loadAdminData(); return; }
-    // The admin's SOS badge: a light refresh while they browse the main page
+    // The admin's СОС badge: a light refresh of the OPEN-ticket pool while
+    // they browse the main page (the badge = the pool size — every open
+    // request is waiting in the ПУБЛИЧНАЯ library)
     if (isAdminUser && topWindow === 'none') {
       let alive = true;
-      api.getAdminData().then((r) => { if (alive) setOpenSosCount((r.tickets || []).filter((x: any) => x.status === 'open').length); }).catch(() => {});
-      const iv = setInterval(() => { api.getAdminData().then((r) => { if (alive) setOpenSosCount((r.tickets || []).filter((x: any) => x.status === 'open').length); }).catch(() => {}); }, 45000);
+      const pull = () => api.getTicketPool()
+        .then(r => { if (!alive) return; setTicketPool(r.pool || []); })
+        .catch(() => {});
+      void pull();
+      const iv = setInterval(pull, 45000);
       return () => { alive = false; clearInterval(iv); };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -554,8 +632,10 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const filtered = useMemo(() => {
     if (!q) return items;
     return items.filter((it: any) => {
-      const hay = [it.title, it.summary, it.description, it.name, it.role?.name, it.specialist?.name, it.customer?.name]
-        .filter(Boolean).join(' ').toLowerCase();
+      const hay = it.kind === 'ticket'
+        ? [it.peerNames, it.eventTitle, it.reason, it.createdByName].filter(Boolean).join(' ').toLowerCase()
+        : [it.title, it.summary, it.description, it.name, it.role?.name, it.specialist?.name, it.customer?.name]
+          .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
   }, [items, q]);
@@ -844,12 +924,16 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     } catch (e: any) { toast(e?.message || 'Error'); } finally { setSosSending(false); }
   };
 
-  // ── ADMIN actions: accept/close a ticket, force-decide the deal, block
-  const adminAct = async (ticketId: string, action: 'accept' | 'close') => {
+  // ── ADMIN actions — the ticket-card ladder lives on the card itself; the
+  // list source must refresh after every action (the pool / the personal
+  // library shift).
+  const reloadTickets = () => { void loadLists(); };
+
+  const closeTicketTk = async (tk: SmmTicketT) => {
     try {
-      await api.adminTicketAction(ticketId, action);
-      if (action === 'accept') void loadAdminData();
-      else { toast(t('smmAdminClosedToast')); void loadAdminData(); }
+      await api.adminTicketAction(tk.id, 'close');
+      toast(t('smmAdminClosedToast'));
+      reloadTickets();
     } catch (e: any) { toast(e?.message || 'Error'); }
   };
 
@@ -860,12 +944,30 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     });
   };
 
+  // «Принять запрос» — the bottom-bar action on an OPEN ticket in the
+  // ПУБЛИЧНАЯ библиотека: the ticket leaves the pool for ALL admins, lands
+  // in THIS admin's личная библиотека, and the deal chat opens right away
+  // (the same «accept → chat» flow the specialists' заявки keep).
+  const acceptTicket = async (tk: SmmTicketT) => {
+    try {
+      await api.adminTicketAction(tk.id, 'accept');
+      toast(t('smmAdminAcceptedToast'));
+      setDiscoverMode(false); // back → the personal library holds the ticket
+      await loadLists();
+      if (tk.chatId) adminOpenTicketChat(tk);
+    } catch (e: any) {
+      toast(/already/i.test(e?.message || '') ? t('smmAdminTakenToast') : (e?.message || 'Error'));
+      reloadTickets();
+    }
+  };
+
   const adminDecideDeal = async (dealType: string, dealId: string, decision: 'accepted' | 'declined') => {
     try {
       if (dealType === 'application') await api.decideApplication(dealId, decision);
       else if (dealType === 'invitation') await api.decideInvitation(dealId, decision);
       else throw new Error('No deal on this ticket');
       toast(decision === 'accepted' ? t('smmAcceptToast') : t('smmDeclineToast'));
+      reloadTickets();
     } catch (e: any) { toast(e?.message || 'Error'); }
   };
 
@@ -1159,16 +1261,18 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     onOpenProfile: () => {
       // Tap the author on any card → THEIR profile window (their card + their
       // published cards). Your own profile lives behind the top-panel avatar.
+      // On a СОС-тикет the author = the user who pressed СОС.
       const target = it.kind === 'event' ? it.customer
         : it.kind === 'post' ? it.specialist
-        : { id: it.id, name: it.name, image: it.image ?? null };
+        : it.kind === 'specialist' ? { id: it.id, name: it.name, image: it.image ?? null }
+        : null;
       if (!target?.id || target.id === myId) return;
       useSmmStore.setState({ profileUserId: target.id, topWindow: 'profile', openChatId: null });
     },
     onAi: () => {
       if (it.kind === 'event') openSmmAi('event', it.id, it.title);
       else if (it.kind === 'post') openSmmAi('post', it.id, it.role?.name || t('smmPost'));
-      else openSmmAi('specialist', it.id, it.name);
+      else if (it.kind === 'specialist') openSmmAi('specialist', it.id, it.name);
     },
     aiActive: aiOpen && aiTarget?.id === it.id,
     onFiles: () => {
@@ -1227,14 +1331,20 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       // test card keeps).
       setAiOpen(false);
       setEditWin(null);
-      const title = it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name;
+      const title = it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.kind === 'specialist' ? it.name : t('smmTicketTitle');
       useSmmStore.setState({ cardChat: { kind: it.kind, id: it.id, title }, topWindow: 'card-chat', openChatId: null });
     },
-    onShare: () => { if (it.kind !== 'specialist') void doShare(it.kind, it.id); },
-    onEdit: () => { openEditWindow(it.kind, it.id, it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name, it); },
+    onShare: () => { if (it.kind === 'event' || it.kind === 'post') void doShare(it.kind, it.id); },
+    onEdit: () => {
+      if (it.kind === 'specialist') openEditWindow('specialist', it.id, it.name, it);
+      else if (it.kind === 'event') openEditWindow('event', it.id, it.title, it);
+      else if (it.kind === 'post') openEditWindow('post', it.id, it.role?.name || t('smmPost'), it);
+    },
     onDelete: () => {
       // «Удалить» opens the same confirm-first dialog the test cards open —
-      // the delete itself happens only after the confirmation.
+      // the delete itself happens only after the confirmation. (A СОС-тикет
+      // is not deletable — it closes through the admin ladder instead.)
+      if (it.kind === 'ticket') return;
       const title = it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.name;
       setSmmDelete({ kind: it.kind, id: it.id, title });
     },
@@ -1301,6 +1411,18 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     // its own floating «добавить спот» control; the chat page / checklist /
     // admin windows carry their own bottom bars instead
     if (topWindow === 'map' || topWindow === 'chat' || topWindow === 'checklist' || topWindow === 'admin') return null;
+    // THE ADMIN'S BAR: «Принять запрос» on an OPEN ticket in the публичная
+    // library (the same mechanic the specialist's «Подать заявку» keeps —
+    // the active card defines the action), «Открыть чат» on an accepted one
+    // in the личная.
+    if (isAdminUser) {
+      const mainVisible = topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat';
+      if (!mainVisible && topWindow !== 'bookmarks' && topWindow !== 'chats' && topWindow !== 'requests') return null;
+      const at = activeItem && activeItem.kind === 'ticket' ? activeItem : null;
+      if (at && !personal && at.status === 'open') return { label: t('smmAdminAcceptReq'), fn: () => void acceptTicket(at) };
+      if (at && personal && at.status === 'accepted' && at.chatId) return { label: t('smmAdminOpenChat'), fn: () => adminOpenTicketChat(at) };
+      return null;
+    }
     // the profile window: a customer invites the viewed specialist right
     // from here (the same пригласить bar the specialist card carries)
     if (topWindow === 'profile') {
@@ -1361,6 +1483,17 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
 
   const renderCard = (it: AnyItem, selected: boolean, variant: 'grid' | 'shelf' | 'slide' | 'feed') => {
     seenItemsRef.current[it.id] = it; // «Изменить» own-detection from ANY surface
+    // THE СОС-ТИКЕТ card — the admin's library item (no marketplace ladder,
+    // its own support ladder instead)
+    if (it.kind === 'ticket') {
+      return <SmmSosTicketCard key={it.id} tk={it} variant={variant} t={t}
+        onOpen={() => useSmmStore.setState({ activeCardId: it.id })}
+        onOpenProfile={() => { if (it.createdById && it.createdById !== myId) useSmmStore.setState({ profileUserId: it.createdById, topWindow: 'profile', openChatId: null }); }}
+        onChat={() => adminOpenTicketChat(it)}
+        onCloseTicket={() => void closeTicketTk(it)}
+        onDealAccept={() => void adminDecideDeal(it.dealType, it.dealId, 'accepted')}
+        onDealDecline={() => void adminDecideDeal(it.dealType, it.dealId, 'declined')} />;
+    }
     const ctx = makeCtx(it, selected);
     if (it.kind === 'event') return <SmmEventCardView key={it.id} event={it} variant={variant} ctx={ctx} />;
     if (it.kind === 'post') return <SmmPostCardView key={it.id} post={it} variant={variant} ctx={ctx} />;
@@ -1500,51 +1633,17 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       );
     }
     if (topWindow === 'admin') {
-      // ── АДМИН-ПАНЕЛЬ: the СОС tickets (accept → enter the deal chat; close;
-      // force-close the deal either way) + the users (block / unblock).
+      // ── АДМИН-ЩИТ: the USERS panel (block / unblock). The СОС-запросы
+      // themselves live in the LIBRARIES now — the публичная is the shared
+      // pool of open requests, the личная holds the accepted ones.
       return (
         <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
           <div className="max-w-2xl mx-auto flex flex-col gap-3">
             {adminLoading && <p className="text-sm text-muted-foreground flex items-center gap-2 justify-center py-10"><Loader2 className="w-4 h-4 animate-spin" /> {t('loading')}</p>}
             {!adminLoading && adminData && (
               <>
-                <p className="text-sm font-bold">{t('smmAdminTickets')}</p>
-                {adminData.tickets.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">{t('smmAdminEmpty')}</p>}
-                {adminData.tickets.map(tk => (
-                  <Card key={tk.id} className="rounded-3xl border border-black bg-white">
-                    <CardContent className="p-4 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold truncate">{tk.peerNames || tk.createdByName}</p>
-                          {tk.eventTitle && <p className="text-xs text-muted-foreground truncate">«{tk.eventTitle}»</p>}
-                          {tk.reason && <p className="text-xs mt-1">{tk.reason}</p>}
-                          <p className="text-[10px] text-muted-foreground mt-1">{new Date(tk.createdAt).toLocaleString()} · {tk.createdByName}</p>
-                        </div>
-                        <Badge variant="secondary" className={`rounded-full text-[10px] shrink-0 ${tk.status === 'open' ? 'bg-red-100 text-red-600' : tk.status === 'accepted' ? 'bg-[#FFF0D9]' : 'bg-[#DFF3E8]'}`}>
-                          {tk.status === 'open' ? t('smmAdminTicketOpen') : tk.status === 'accepted' ? t('smmAdminTicketAccepted') : t('smmAdminTicketClosed')}
-                        </Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {tk.status !== 'closed' && (
-                          <Button size="sm" onClick={() => adminOpenTicketChat(tk)} className="h-8 rounded-full text-xs">{t('smmAdminOpenChat')}</Button>
-                        )}
-                        {tk.status === 'open' && (
-                          <Button size="sm" variant="outline" onClick={() => adminAct(tk.id, 'accept')} className="h-8 rounded-full text-xs border-black/30">{t('smmAdminAccept')}</Button>
-                        )}
-                        {tk.status !== 'closed' && (
-                          <Button size="sm" variant="outline" onClick={() => adminAct(tk.id, 'close')} className="h-8 rounded-full text-xs border-black/30">{t('smmAdminClose')}</Button>
-                        )}
-                        {!!tk.dealType && tk.dealId && tk.status !== 'closed' && (
-                          <>
-                            <Button size="sm" variant="outline" onClick={() => adminDecideDeal(tk.dealType, tk.dealId, 'accepted')} className="h-8 rounded-full text-xs border-[#DFF3E8] text-cta">{t('smmAdminDealAccept')}</Button>
-                            <Button size="sm" variant="outline" onClick={() => adminDecideDeal(tk.dealType, tk.dealId, 'declined')} className="h-8 rounded-full text-xs border-destructive/50 text-destructive">{t('smmAdminDealDecline')}</Button>
-                          </>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-                <p className="text-sm font-bold mt-2">{t('smmAdminUsers')}</p>
+                <div className="rounded-2xl bg-muted/60 border border-black/10 px-3 py-2 text-xs text-muted-foreground">{t('smmAdminTicketsHint')}</div>
+                <p className="text-sm font-bold">{t('smmAdminUsers')}</p>
                 {adminData.users.map(u => (
                   <div key={u.id} className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
                     <div className="min-w-0 flex-1">
@@ -1805,6 +1904,29 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       );
     }
     if (filtered.length === 0) {
+      // THE ADMIN'S EMPTY LIBRARIES: the публичная explains the shared pool,
+      // the личная points the admin at the pool when they haven't accepted
+      // anything yet.
+      if (isAdminUser) {
+        return (
+          <main className="flex-1 min-h-0 overflow-y-auto">
+            <div className="max-w-7xl mx-auto px-4 py-4 sm:py-6 h-full min-h-0 flex flex-col">
+              <Card className="rounded-4xl border-dashed border-black/30 bg-white flex-1 min-h-0 flex flex-col justify-center">
+                <CardContent className="py-12 text-center">
+                  <Siren className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium mb-2">{personal ? t('smmAdminMineEmpty') : t('smmAdminPoolEmpty')}</h3>
+                  <p className="text-muted-foreground mb-4 max-w-md mx-auto">{personal ? t('smmAdminMineHint') : t('smmAdminPoolHint')}</p>
+                  {personal && (
+                    <Button variant="outline" className="rounded-full border-black" onClick={() => gotoLibrary(true)}>
+                      <Compass className="w-4 h-4 mr-2" /> {t('modeDiscover')}
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </main>
+        );
+      }
       // The specialist's ПУБЛИЧНАЯ библиотека is the orders feed — its empty
       // state spells out what an order carries: date, short description, the
       // place on the map, the budget per specialist and the order type.
@@ -1973,8 +2095,8 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
                 className={`relative rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10 ${tw === 'admin' ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
                 title={t('smmAdmin')} aria-label={t('smmAdmin')}>
                 <Shield className="w-4 h-4" />
-                {openSosCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center">{openSosCount}</span>
+                {ticketPool.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center">{ticketPool.length}</span>
                 )}
               </Button>
             ) : (
@@ -2023,10 +2145,12 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       dock at the very bottom and this bar above it — without the raise the
       bar paints OVER the library dock. (The third dock — the role switcher —
       is GONE: separate registration fixed the specialist/customer tab.) */}
-      {isAdminUser && openSosCount > 0 && topWindow === 'none' && (
-        <button onClick={() => useSmmStore.setState({ topWindow: 'admin' })}
+      {/* THE СОС BANNER — the open-request count lives in the ПУБЛИЧНАЯ
+      library now: the banner leads there (the shared pool of all admins). */}
+      {isAdminUser && ticketPool.length > 0 && topWindow === 'none' && (
+        <button onClick={() => gotoLibrary(true)}
           className="desktop-dock desktop-dock-raised shrink-0 z-40 w-full bg-destructive text-white text-xs font-bold px-4 py-2 flex items-center justify-center gap-2">
-          <Siren className="w-4 h-4" /> {t('smmSosBanner', { n: openSosCount })}
+          <Siren className="w-4 h-4" /> {t('smmSosBanner', { n: ticketPool.length })}
         </button>
       )}
       {barAction && (
