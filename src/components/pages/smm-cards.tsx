@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CreatorStrip, tagHash } from '@/components/shared-bits';
 import { eventPlatformIcon, eventPlatformLabel, fmtMoney, mapEmbedUrl, mediaSrc } from './smm-bits';
-import { CalendarClock, ChevronRight, ClipboardList, Bot, Briefcase, Film, Handshake, LayoutGrid, Link2, MapPin, Megaphone, MessageCircle, Paperclip, Sparkles, Star, Trash2, Users, Wallet } from 'lucide-react';
+import { CalendarClock, ChevronRight, ClipboardList, Bot, Briefcase, Film, Handshake, LayoutGrid, Link2, MapPin, Megaphone, MessageCircle, Paperclip, Pencil, Sparkles, Star, Trash2, Users, Wallet } from 'lucide-react';
 import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
 
 export type CardVariant = 'grid' | 'shelf' | 'slide' | 'feed';
@@ -39,6 +39,10 @@ export interface CardCtx {
   onChat: () => void;
   onShare: () => void;
   onDelete: () => void;
+  // «Изменить» — provided ONLY for OWN мероприятие/пост cards rendered in the
+  // личная библиотека (the parent decides); when absent the button never
+  // renders, so the публичная библиотека stays read-only.
+  onEdit?: () => void;
   onOpen: () => void;
   // «Обсудить с ИИ» — the same AI discussion the test cards open
   onAi: () => void;
@@ -305,6 +309,11 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
           <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
         </Button>
       )}
+      {ctx.onEdit && (
+        <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('editTest')} className={LADDER_BTN}>
+          <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
+        </Button>
+      )}
       <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmEventDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
         <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
       </Button>
@@ -328,6 +337,7 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
         {own && !event.parentId && (
           <SlideBtn onClick={ctx.onPublic || (() => {})} icon={<Users className="w-4 h-4 shrink-0 text-primary" />} label={t('gPublic')} />
         )}
+        {ctx.onEdit && <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />}
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
       </>
     );
@@ -431,6 +441,11 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
           <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
         </Button>
       )}
+      {ctx.onEdit && (
+        <Button size="sm" variant="outline" onClick={ctx.onEdit} title={t('smmPostEdit')} className={LADDER_BTN}>
+          <Pencil className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gEdit')}</span>
+        </Button>
+      )}
       <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmPostDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
         <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
       </Button>
@@ -474,6 +489,7 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         {own && !post.parentId && (
           <SlideBtn onClick={ctx.onPublic || (() => {})} icon={<Users className="w-4 h-4 shrink-0 text-primary" />} label={t('gPublic')} />
         )}
+        {ctx.onEdit && <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />}
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
       </>
     );

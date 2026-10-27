@@ -29,7 +29,7 @@ import { tUI } from '@/lib/i18n';
 import { CreatorStrip } from '@/components/shared-bits';
 import {
   ArrowLeft, Bot, ChevronDown, ChevronUp, Compass, Edit, Film, Library, LayoutGrid, Link2, Loader2, MessageCircle, MessageSquare,
-  Paperclip, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList, ClipboardCheck, Siren, Shield, Upload,
+  Paperclip, Pencil, Play, Plus, Rows3, Search, Send, Star, Trash2, X, ClipboardList, ClipboardCheck, Siren, Shield, Upload,
   Map as MapIcon,
 } from 'lucide-react';
 // Professional feed engine — the SAME Swiper setup the tests feed runs
@@ -64,6 +64,7 @@ import { useExitMount } from '@/components/motion';
 import { ResizableSheetFrame } from '@/components/resize-sheet';
 import { SheetHeaderSwitcher } from '@/components/sheet-switcher';
 import type { SheetOption } from '@/components/pages/take-test/sheet-config';
+import { SmmEventForm, SmmPostForm, type SmmFormHandle } from './smm-editors';
 
 // One AI conversation about one SMM card (persisted in localStorage — the
 // same deal the test dashboard's threads keep, but scoped to the SMM page)
@@ -295,6 +296,18 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   // The delete dialog («Удалить» on the card — the same confirm-first dialog
   // the test cards open before deleting)
   const [smmDelete, setSmmDelete] = useState<{ kind: 'event' | 'post' | 'specialist'; id: string; title: string } | null>(null);
+  // THE EDIT WINDOW («Изменить» on an OWN card in the личная библиотека —
+  // the SAME window the test cards open: a resizable sheet with the editor
+  // body inside + Save, NOT the full-page editor). The button renders only
+  // on own мероприятие/пост cards of the personal library — the публичная
+  // stays read-only (the copy-to-edit flow for strangers' cards is gone).
+  const [editWin, setEditWin] = useState<{ kind: 'event' | 'post'; id: string; title: string } | null>(null);
+  const [editWinSaving, setEditWinSaving] = useState(false);
+  const editWinMounted = useExitMount(!!editWin, 200);
+  const editWinLast = useRef<{ kind: 'event' | 'post'; id: string; title: string } | null>(null);
+  useEffect(() => { if (editWin) editWinLast.current = editWin; }, [editWin]);
+  const editEventFormRef = useRef<SmmFormHandle>(null);
+  const editPostFormRef = useRef<SmmFormHandle>(null);
   // The files target per card (the switcher's «Файлы» option reuses the
   // target built at the card's «Файлы» click — the same cache the tests'
   // dashFilesCountRef keeps)
@@ -755,12 +768,36 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     } catch { toast(url); }
   };
 
+  // ── THE EDIT WINDOW TARGET («Изменить» from an own card in the личная
+  // библиотека) — the SAME resizable-sheet editor the test cards open. Own
+  // мероприятие/пост opens in the window directly; anything else never wears
+  // the button (the guard keeps a toast for safety from stale surfaces).
+  const openEditWindow = (kind: 'event' | 'post' | 'specialist', id: string, title: string, item?: AnyItem) => {
+    // one window at a time: the AI panel / files / chat windows yield
+    setAiOpen(false);
+    useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
+    if (kind === 'specialist') {
+      // The specialist card is edited through YOUR profile (name/avatar);
+      // a stranger's card can never be changed.
+      if (id === myId) setMeOpen(true);
+      else toast(t('smmEditOwnOnly'));
+      return;
+    }
+    // own-or-not: the captured card first, then the seen-cards cache (every
+    // rendered card), then the current dashboard list.
+    const known = (item as any) || (seenItemsRef.current as any)[id] || (items.find(x => x.id === id) as any);
+    const own = kind === 'post' ? known?.specialistId === myId : known?.customerId === myId;
+    if (!own) { toast(t('smmEditOwnOnly')); return; }
+    setEditWin({ kind, id, title });
+  };
+
   // ── «Обсудить с ИИ» — the SAME window the test cards open, fed by the
   // card's passport (/api/smm/ai-chat). One window at a time: the files /
-  // chat windows yield (the same rule the test cards keep).
+  // chat / edit windows yield (the same rule the test cards keep).
   const openSmmAi = (kind: 'event' | 'post' | 'specialist', id: string, title: string) => {
     const tid = `${kind}:${id}`;
     const th = aiThreads[tid];
+    setEditWin(null);
     useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
     setAiTarget({ kind, id, title });
     setAiMessages(th ? [...th.messages] : []);
@@ -1182,6 +1219,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     if (filesTarget) return { kind: filesTarget.kind, id: filesTarget.id, title: filesTarget.title };
     if (cardChat) return cardChat;
     if (aiOpen && aiTarget) return aiTarget;
+    if (editWin) return editWin;
     return null;
   })();
   const smmFilesCount = (() => {
@@ -1209,18 +1247,19 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     if (!smmWindowCard) return;
     const w = smmWindowCard;
     if (key === 'files') {
-      setAiOpen(false);
+      setEditWin(null); setAiOpen(false);
       const cached = filesItemRef.current[w.id];
       if (cached) useSmmStore.setState({ filesTarget: cached, topWindow: 'files', openChatId: null });
       return;
     }
     if (key === 'ai') {
+      setEditWin(null);
       useSmmStore.setState({ filesTarget: null, cardChat: null, topWindow: 'none' });
       openSmmAi(w.kind, w.id, w.title);
       return;
     }
     if (key === 'group') {
-      setAiOpen(false);
+      setEditWin(null); setAiOpen(false);
       useSmmStore.setState({ cardChat: { kind: w.kind, id: w.id, title: w.title }, topWindow: 'card-chat', openChatId: null });
     }
   } };
@@ -1276,7 +1315,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           .then((p: any) => {
             const media = (p.posts || []).flatMap((pp: any) => ((pp.media || []) as { url: string; type: string }[]));
             const files = (p.posts || []).flatMap((pp: any) => ((pp.attachments || []) as SmmFilesTarget['files']));
-            const target: SmmFilesTarget = { kind: 'post', id: it.id, title: it.name, media: media.slice(0, 60), files: files.slice(0, 30) };
+            const target: SmmFilesTarget = { kind: 'post', id: it.id, title: (it as SmmSpecialistT).name, media: media.slice(0, 60), files: files.slice(0, 30) };
             filesItemRef.current[it.id] = target;
             useSmmStore.setState({ filesTarget: target, topWindow: 'files', openChatId: null });
           })
@@ -1303,12 +1342,25 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     onChat: () => {
       // «Чат» on the card = the per-card GROUP CHAT WINDOW — everyone's chat
       // about THIS card, the exact mechanic the test cards keep. One window
-      // at a time: the AI panel closes (the same rule the test card keeps).
+      // at a time: the AI panel and the edit window close (the same rule the
+      // test card keeps).
       setAiOpen(false);
+      setEditWin(null);
       const title = it.kind === 'event' ? it.title : it.kind === 'post' ? (it.role?.name || t('smmPost')) : it.kind === 'specialist' ? it.name : t('smmTicketTitle');
-      useSmmStore.setState({ cardChat: { kind: it.kind, id: it.id, title }, topWindow: 'card-chat', openChatId: null });
+      // (makeCtx never serves СОС-тикеты — renderCard handles them through
+      // SmmSosTicketCard / adminOpenTicketChat before this ctx is built)
+      useSmmStore.setState({ cardChat: { kind: it.kind as SmmCardChatTarget['kind'], id: it.id, title }, topWindow: 'card-chat', openChatId: null });
     },
     onShare: () => { if (it.kind === 'event' || it.kind === 'post') void doShare(it.kind, it.id); },
+    // «Изменить» — only an OWN мероприятие/пост in the ЛИЧНАЯ библиотека
+    // wears the button (the публичная and strangers' cards stay read-only;
+    // the specialist card is edited through the profile instead).
+    onEdit: (() => {
+      if (!personal) return undefined;
+      if (it.kind === 'event') return it.customerId === myId ? () => openEditWindow('event', it.id, it.title, it) : undefined;
+      if (it.kind === 'post') return it.specialistId === myId ? () => openEditWindow('post', it.id, it.role?.name || t('smmPost'), it) : undefined;
+      return undefined;
+    })(),
     onDelete: () => {
       // «Удалить» opens the same confirm-first dialog the test cards open —
       // the delete itself happens only after the confirmation. (A СОС-тикет
@@ -2274,6 +2326,70 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           switcher={smmSwitcher}
         />
       )}
+      {/* THE EDIT WINDOW — «Изменить» on an OWN card in the личная библиотека:
+      the SAME resizable sheet the test cards open (the editor body inside +
+      Save in the footer; the header wears the window switcher). */}
+      {editWinMounted && editWinLast.current && (() => {
+        const w = editWinLast.current;
+        const title = w.kind === 'event' ? t('smmEventEdit') : t('smmPostEdit');
+        return (
+          <ResizableSheetFrame
+            open={!!editWin}
+            onClose={() => setEditWin(null)}
+            initialVh={0.85}
+            minVh={0.4}
+            maxW="max-w-3xl"
+            header={
+              <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
+                <SheetHeaderSwitcher
+                  icon={<Pencil className="w-4 h-4 text-white" />}
+                  title={title}
+                  subtitle={w.title}
+                  options={smmSheetOptions}
+                  onSelect={smmSwitcher.onSelect}
+                />
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => setEditWin(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            }
+            body={
+              <div className="px-4 py-4">
+                <div className="max-w-3xl mx-auto space-y-4">
+                  {w.kind === 'event' ? (
+                    <SmmEventForm
+                      ref={editEventFormRef}
+                      editingId={w.id}
+                      onSaving={setEditWinSaving}
+                      onSaved={() => { setEditWin(null); bumpAndReload(); }}
+                      onFail={() => setEditWin(null)}
+                    />
+                  ) : (
+                    <SmmPostForm
+                      ref={editPostFormRef}
+                      editingId={w.id}
+                      onSaving={setEditWinSaving}
+                      onSaved={() => { setEditWin(null); bumpAndReload(); }}
+                      onFail={() => setEditWin(null)}
+                    />
+                  )}
+                </div>
+              </div>
+            }
+            footer={
+              <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-4 pt-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+                <Button
+                  onClick={() => (w.kind === 'event' ? editEventFormRef.current?.save() : editPostFormRef.current?.save())}
+                  disabled={editWinSaving}
+                  className="w-full rounded-full bg-primary hover:bg-primary/90"
+                >
+                  {editWinSaving ? t('saving') : t('save')}
+                </Button>
+              </div>
+            }
+          />
+        );
+      })()}
       {/* ── MY PROFILE — the avatar's «всплывающая снизу страница»: the SAME
       resizable-sheet page type, the ProfileBody inside (avatar/name/company/
       background/logout); the universal back of the sheet is its drag-down +
