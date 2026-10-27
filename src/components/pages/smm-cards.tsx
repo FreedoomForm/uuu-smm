@@ -761,12 +761,16 @@ export function RequestRow({
   // Deal lifecycle (Mercur model): decisions / completion / reviews
   canDecide, onAccept, onDecline, onComplete, onReview, reviewed,
   confirmations, myConfirmDone, t,
+  // ЗАЯВКА БЕЗ ТЕСТА: the ad link IS the заявка's substance — the customer
+  // must see it right in the row (it also lands in the direct chat)
+  proofUrl,
 }: {
   kindLabel: string; title: string; sub: string; status: string;
   score?: string; onWithdraw?: () => void; withdrawLabel: string;
   canDecide?: boolean; onAccept?: () => void; onDecline?: () => void;
   onComplete?: () => void; onReview?: () => void; reviewed?: boolean;
   confirmations?: number; myConfirmDone?: boolean; t: CardCtx['t'];
+  proofUrl?: string | null;
 }) {
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3">
@@ -776,6 +780,13 @@ export function RequestRow({
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold truncate">{kindLabel} · {title}</p>
         <p className="text-xs text-muted-foreground truncate">{sub}</p>
+        {proofUrl && (
+          <a href={proofUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1 text-xs font-bold text-cta underline truncate mt-0.5 max-w-full">
+            <Link2 className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t('smmProofLink')}: {proofUrl.replace(/^https?:\/\//, '')}</span>
+          </a>
+        )}
         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
           <Badge variant="secondary" className="rounded-full text-[10px]">
             {status === 'pending' ? t('smmStatusPending')

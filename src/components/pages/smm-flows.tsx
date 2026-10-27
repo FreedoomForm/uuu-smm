@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
+import { adUrlOk, normalizeAdUrl } from '@/lib/ad-url';
 import { tUI } from '@/lib/i18n';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
@@ -84,7 +85,10 @@ export function SmmApplyView() {
     return () => { alive = false; };
   }, [applyCtx, setPage]);
 
-  const linkOk = /^https?:\/\/\S+\.\S+/i.test(proofUrl.trim());
+  // The link is normalized (t.me/…, instagram.com/…, @handle all work) and
+  // the send button is NEVER silently dead: an invalid link now always gives
+  // feedback — the toast + the inline hint under the input (27.10 fix).
+  const linkOk = adUrlOk(proofUrl);
 
   const confirm = async () => {
     if (!applyCtx) return;
@@ -94,7 +98,7 @@ export function SmmApplyView() {
       await api.createApplication({
         eventId: applyCtx.eventId,
         roleId: applyCtx.roleId,
-        proofUrl: proofUrl.trim(),
+        proofUrl: normalizeAdUrl(proofUrl),
         proofNote: proofNote.trim(),
       });
       window.dispatchEvent(new CustomEvent('smm-toast', { detail: t('smmApplySent') }));
@@ -113,7 +117,7 @@ export function SmmApplyView() {
     <EditorShell title={t('smmApplyTitle')} onBack={back} lang={lang} cycleLang={cycleLang}
       saveLabel={t('smmApplyConfirm')}
       onSave={() => { void confirm(); }}
-      saving={sending} saveDisabled={sending || !linkOk}>
+      saving={sending}>
       {loading ? (
         <p className="text-sm text-muted-foreground flex items-center gap-2 justify-center py-10"><Loader2 className="w-4 h-4 animate-spin" /> {t('loading')}</p>
       ) : (
@@ -147,6 +151,9 @@ export function SmmApplyView() {
                 inputMode="url"
                 className="h-11 rounded-2xl border-black/20 bg-white text-sm"
               />
+              {proofUrl.trim() !== '' && !linkOk && (
+                <p className="text-xs font-bold text-red-500">{t('smmApplyLinkBad')}</p>
+              )}
               <div>
                 <Label className="text-sm font-bold">{t('smmApplyNote')}</Label>
                 <Textarea

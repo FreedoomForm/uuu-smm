@@ -8,6 +8,7 @@
 import { db } from "@/lib/db";
 import { ApiError } from "../http/errors";
 import { telegramNotify } from "@/lib/telegram";
+import { normalizeAdUrl } from "@/lib/ad-url";
 
 type PostMedia = { url: string; type: "video" | "image"; title?: string };
 
@@ -676,7 +677,9 @@ export async function createApplication(
   // ЗАЯВКА БЕЗ ТЕСТА: the specialist attaches a LINK to a video / post with
   // the ad (Instagram / TikTok / YouTube — the platform the event's ТЗ
   // names). The link is REQUIRED; the score fields stay for legacy rows.
-  const proofUrl = String(body.proofUrl || "").trim().slice(0, 500);
+  // The URL is normalized server-side too («t.me/x», «instagram.com/p/x»,
+  // «@handle» → https://…) so even stale clients never produce a dead заявка.
+  const proofUrl = normalizeAdUrl(String(body.proofUrl || "")).slice(0, 500);
   if (!/^https?:\/\/\S+\.?/i.test(proofUrl)) {
     throw ApiError.badRequest("proofUrl must be a valid http(s) link to the ad post/video");
   }

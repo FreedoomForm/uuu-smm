@@ -449,6 +449,8 @@ const en: Dict = {
   smmApplyNote: 'Comment (optional)',
   smmApplyNotePh: 'What the link shows: reach, results, why this work fits',
   smmApplyNeedLink: 'Paste the link to the ad post/video first',
+  smmApplyLinkBad: 'The link looks incomplete — use https://instagram.com/p/… , t.me/… or @handle',
+  smmProofLink: 'Ad link',
   // ИИ-АГЕНТ — the one-button platform automation (replaces the tools page)
   navAgent: 'AI agent',
   agentTitle: 'AI agent',
@@ -1036,6 +1038,8 @@ const ru: Dict = {
   smmApplyNote: 'Комментарий (необязательно)',
   smmApplyNotePh: 'Что показывает ссылка: охваты, результаты, почему эта работа подходит',
   smmApplyNeedLink: 'Сначала вставьте ссылку на рекламный пост/видео',
+  smmApplyLinkBad: 'Ссылка неполная — укажите адрес вида https://instagram.com/p/… , t.me/… или @ник',
+  smmProofLink: 'Реклама',
   // ИИ-АГЕНТ — автоматизация платформы одной кнопкой (замена страницы «Инструменты»)
   navAgent: 'ИИ-агент',
   agentTitle: 'ИИ-агент',
@@ -1621,6 +1625,8 @@ const uz: Dict = {
   smmApplyNote: 'Izoh (majburiy emas)',
   smmApplyNotePh: 'Havola nima koʼrsatadi: qamrov, natijalar, nega bu ish mos',
   smmApplyNeedLink: 'Avval reklama posti/videosiga havolani qoʼying',
+  smmApplyLinkBad: 'Havola toʻliq emas — https://instagram.com/p/… , t.me/… yoki @nom koʼrinishida yozing',
+  smmProofLink: 'Reklama',
   // AI-AGENT — bitta tugma bilan platforma avtomatlashuvi («Vositalar» oʼrniga)
   navAgent: 'AI agent',
   agentTitle: 'AI agent',

@@ -3,7 +3,7 @@
 // Small shared bits of the SMM screens: platform meta, avatar fallback,
 // money formatting, media URL resolution and the Google-Maps embed URL.
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Instagram, Music2, Send, Youtube } from 'lucide-react';
 
 export function eventPlatformIcon(platform: string, cls = 'w-4 h-4') {
@@ -60,5 +60,30 @@ export function AvatarFallbackName({ name, image, creatorId, big }: {
     <span className={`rounded-full overflow-hidden bg-cta text-white flex items-center justify-center font-extrabold ring-2 ring-white shadow-md shrink-0 ${big ? 'w-11 h-11 text-base' : 'w-9 h-9 text-sm'}`} title={name}>
       {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : initial}
     </span>
+  );
+}
+
+// Lightweight toast for the 'smm-toast' event. Lives HERE (shared bits) so
+// every surface can mount it: the smm dashboard AND the standalone editor
+// pages (apply / invite / post / event) — before this, toasts fired on the
+// apply page were invisible (the host only existed inside the dashboard),
+// which left API errors AND the «заявка отправлена» confirmation unseen.
+export function SmmToast() {
+  const [msg, setMsg] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => {
+      setMsg((e as CustomEvent).detail);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setMsg(null), 2600);
+    };
+    window.addEventListener('smm-toast', on);
+    return () => window.removeEventListener('smm-toast', on);
+  }, []);
+  if (!msg) return null;
+  return (
+    <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[80] rounded-full bg-black/85 text-white text-sm px-4 py-2 shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 max-w-[90vw] truncate">
+      {msg}
+    </div>
   );
 }

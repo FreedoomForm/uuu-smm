@@ -34,7 +34,7 @@ import { useSmmStore } from '@/stores/smm-store';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Film, Image as ImgIcon, Loader2, MapPin, Paperclip, Plus, Trash2 } from 'lucide-react';
 import LangButton from '@/components/lang-button';
 import { Collapse } from '@/components/motion';
-import { SMM_PLATFORMS, eventPlatformIcon, eventPlatformLabel, mapEmbedUrl, mediaSrc, fmtMoney } from './smm-bits';
+import { SMM_PLATFORMS, eventPlatformIcon, eventPlatformLabel, mapEmbedUrl, mediaSrc, fmtMoney, SmmToast } from './smm-bits';
 import type { SmmEventT, SmmPostT, SmmPostMedia, SmmAttachmentT } from '@/lib/app-types';
 import type { AttachmentItem } from '@/components/attachment-utils';
 
@@ -57,6 +57,7 @@ export function EditorShell({ title, onBack, lang, cycleLang, children, saveLabe
 }) {
   return (
     <div className="relative h-[100dvh] flex flex-col bg-background overflow-hidden screen-enter">
+      <SmmToast />
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b">
         <div className="max-w-7xl mx-auto px-2 sm:px-4 h-14 lg:h-16 flex flex-nowrap items-center justify-between gap-2">
           <div className="flex items-center gap-1 min-w-0">

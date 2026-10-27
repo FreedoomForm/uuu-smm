@@ -78,7 +78,7 @@ type AiMsg = { role: 'user' | 'assistant'; content: string };
 import {
   BookmarkRow, ChatRow, RequestRow, SmmEventCardView, SmmPostCardView, SmmSpecialistCardView, smmSlideBgFor, type CardCtx,
 } from './smm-cards';
-import { fmtMoney, mediaSrc } from './smm-bits';
+import { fmtMoney, mediaSrc, SmmToast } from './smm-bits';
 
 type AnyItem = ({ kind: 'post' } & SmmPostT) | ({ kind: 'event' } & SmmEventT) | ({ kind: 'specialist' } & SmmSpecialistT);
 
@@ -1329,6 +1329,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
               <RequestRow key={r.id} kindLabel={`${r.kind === 'application' ? t('smmApplication') : t('smmInvitation')} · ${r.direction === 'incoming' ? t('smmReqIn') : t('smmReqOut')}`}
                 title={r.eventTitle}
                 sub={`${r.counterpartyName ? `${r.counterpartyName} · ` : ''}${r.roleName}`}
+                proofUrl={r.kind === 'application' ? (r.proofUrl || null) : null}
                 status={r.status} score={r.kind === 'application' ? `${r.score}/${r.totalQuestions}` : (r.estimate != null ? `${t('smmEstimate')}: ${fmtMoney(r.estimate)}` : undefined)}
                 onWithdraw={r.direction === 'incoming' ? undefined : () => withdraw(r)} withdrawLabel={t('smmRequestWithdraw')}
                 canDecide={canDecide}
@@ -1939,22 +1940,4 @@ function SmmFilesWindow({ target, open, onClose, t, onOpenImage, switcher }: {
 }
 
 // Lightweight toast: listens to the local 'smm-toast' event
-function SmmToast() {
-  const [msg, setMsg] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const on = (e: Event) => {
-      setMsg((e as CustomEvent).detail);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setMsg(null), 2600);
-    };
-    window.addEventListener('smm-toast', on);
-    return () => window.removeEventListener('smm-toast', on);
-  }, []);
-  if (!msg) return null;
-  return (
-    <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[80] rounded-full bg-black/85 text-white text-sm px-4 py-2 shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 max-w-[90vw] truncate">
-      {msg}
-    </div>
-  );
-}
+// (the component itself lives in smm-bits so the editor pages can host it too)
