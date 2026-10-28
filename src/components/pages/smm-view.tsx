@@ -1043,29 +1043,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       toast(e?.message || 'Error');
     }
   };
-  // ── THE ЗАЯВКА CARDS — the customer accepts/declines a specialist's
-  // заявка right from its chat card (the same optimistic mechanic the
-  // invitation card keeps: instant local status, then the API + meta
-  // refetch; the peer's long-poll wakes on the system message).
-  const patchChatApplication = (chatId: string, id: string, status: string) => {
-    setChatMeta(prev => {
-      const m = prev[chatId];
-      if (!m) return prev;
-      return { ...prev, [chatId]: { ...m, applications: (m.applications || []).map(a => (a.id === id ? { ...a, status } : a)) } };
-    });
-  };
-  const decideChatApplication = async (chatId: string, id: string, decision: 'accepted' | 'declined') => {
-    patchChatApplication(chatId, id, decision);
-    try {
-      await api.decideApplication(id, decision);
-      toast(decision === 'accepted' ? t('smmDealConfirmToast') : t('smmStatusDeclined'));
-      await loadChatMeta(chatId);
-      bumpAndReload();
-    } catch (e: any) {
-      patchChatApplication(chatId, id, 'pending');
-      toast(e?.message || 'Error');
-    }
-  };
   // «Выбрать другую роль» — cancel the pending invitation, then reopen the
   // estimate screen with the specialist's role CHIPS (no role pre-picked).
   const inviteOtherRoleFromChat = async (chatId: string, invId: string) => {
@@ -1133,10 +1110,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   // specialist = Принять/Отказать, customer = Отменить/Выбрать другую роль).
   const renderChatBubble = (m: import('@/lib/app-types').SmmChatMessageT, chatId: string) => {
     const mine = m.userId === myId;
-    // ПРИГЛАШЕНИЕ#<id> → the invitation card (specialist accepts/declines,
-    // customer cancels/picks another role); ЗАЯВКА#<id> → the заявка card
-    // (the CUSTOMER accepts/declines the specialist's application — the
-    // specialist sees the same card with the live status only).
     const invMatch = m.kind === 'system' ? m.text.match(/^ПРИГЛАШЕНИЕ#(\S+)/) : null;
     const inv = invMatch ? (chatMeta[chatId]?.invitations || []).find(i => i.id === invMatch[1]) : null;
     if (inv) {
@@ -1145,7 +1118,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       const pending = inv.status === 'pending';
       const statusChip = !pending ? (
         <p className={`mt-1 text-[11px] font-bold ${inv.status === 'accepted' || inv.status === 'completed' ? 'text-green-700' : 'text-destructive'}`}>
-          {inv.status === 'accepted' ? t('smmInvAccepted') : inv.status === 'declined' ? t('smmInvDeclinedCh') : inv.status === 'cancelled' ? t('smmInvCancelled') : t('smmStatusCompleted')}
+          {inv.status === 'accepted' ? t('smmInvAccepted') : inv.status === 'declined' ? t('smmInvDeclined') : inv.status === 'cancelled' ? t('smmInvCancelled') : t('smmStatusCompleted')}
         </p>
       ) : null;
       return (
@@ -1185,45 +1158,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       );
     }
     const text = invMatch ? m.text.replace(/^ПРИГЛАШЕНИЕ#\S+/, 'ПРИГЛАШЕНИЕ') : m.text;
-    // ── ЗАЯВКА#<id> — the specialist's application card: the customer gets
-    // the «Принять»/«Отказать» buttons while it is pending, both sides see
-    // the live status chip after the decision (the poll keeps it fresh).
-    const appMatch = m.kind === 'system' ? m.text.match(/^ЗАЯВКА#(\S+)/) : null;
-    const app = appMatch ? (chatMeta[chatId]?.applications || []).find(a => a.id === appMatch[1]) : null;
-    if (app) {
-      const isCust = app.customerId === myId;
-      const pending = app.status === 'pending';
-      const appStatusChip = !pending ? (
-        <p className={`mt-1 text-[11px] font-bold ${app.status === 'accepted' || app.status === 'completed' ? 'text-green-700' : 'text-destructive'}`}>
-          {app.status === 'accepted' ? t('smmInvAccepted') : app.status === 'declined' ? t('smmInvDeclinedCh') : t('smmStatusCompleted')}
-        </p>
-      ) : null;
-      return (
-        <div key={m.id} className="flex justify-start">
-          <div className="max-w-[85%] rounded-2xl px-3 py-2 text-sm bg-[#FFF0D9] border border-black/10 text-black/80">
-            <p className="text-[10px] font-bold opacity-70 mb-0.5">{m.userName}</p>
-            <p className="font-bold">{t('smmApplication')}</p>
-            <p className="text-xs mt-0.5">«{app.eventTitle}» · {t('smmPostRole')}: {app.roleName}</p>
-            {app.proofUrl && (
-              <a href={app.proofUrl} target="_blank" rel="noreferrer"
-                className="block text-xs underline text-primary mt-0.5 break-all line-clamp-2"
-                onClick={e => e.stopPropagation()}>{app.proofUrl}</a>
-            )}
-            {appStatusChip}
-            {pending && isCust && (
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                <Button size="sm" onClick={() => void decideChatApplication(chatId, app.id, 'accepted')} className="h-7 px-3 rounded-full bg-green-600 hover:bg-green-700 text-white text-xs">
-                  {t('smmInvAccept')}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => void decideChatApplication(chatId, app.id, 'declined')} className="h-7 px-3 rounded-full border-destructive/50 text-destructive hover:bg-destructive/10 text-xs">
-                  {t('smmInvDecline')}
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    }
     return (
       <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
         <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.kind === 'system' ? 'bg-[#FFF0D9] border border-black/10 text-black/80' : mine ? 'bg-cta text-white' : 'bg-muted'}`}>
@@ -1423,12 +1357,8 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     } catch (e: any) { toast(e?.message || 'Error'); } finally { setReviewBusy(false); }
   };
 
-  // «Подать заявку» — now the event CARD's own ladder button (the bottom-bar
-  // one is gone): the card passes ITSELF, so the button always binds to the
-  // exact мероприятие it sits on — public library, bookmarks, any surface.
-  const applyFromCard = (ev?: SmmEventT) => {
-    const event = ev || activeEvent;
-    if (!event) return;
+  const applyFromCard = () => {
+    if (!activeEvent) return;
     // The button ALWAYS works: a specialist without any role yet is led to
     // the post editor — the role (+ prices) is born there, then the заявка
     // can be sent. Never a dead disabled button.
@@ -1438,11 +1368,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       setPage('smm-post-editor');
       return;
     }
-    // heal a stale pick (a deleted role) — the first own role applies
-    const roleId = myRoles.find(r => r.id === pickedApplyRole)?.id || myRoles[0]?.id || '';
-    if (!roleId) return;
+    if (!pickedApplyRole) return;
     useSmmStore.setState({
-      applyCtx: { eventId: event.id, roleId, testIds: event.testIds || [] },
+      applyCtx: { eventId: activeEvent.id, roleId: pickedApplyRole, testIds: activeEvent.testIds || [] },
       inviteCtx: null,
     });
     setPage('smm-apply');
@@ -1711,14 +1639,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       if (it.kind === 'post') return it.specialistId === myId ? () => openEditWindow('post', it.id, it.role?.name || t('smmPost'), it) : undefined;
       return undefined;
     })(),
-    // «Подать заявку» — the FOREIGN мероприятие card's own button (every
-    // surface the card shows on): the role is picked by the chips ON the
-    // card, the button opens the заявка flow for THIS event.
-    onApply: (() => {
-      if (!isSpecialist || it.kind !== 'event' || it.customerId === myId) return undefined;
-      const ev = it;
-      return () => applyFromCard(ev);
-    })(),
     onDelete: () => {
       // «Удалить» opens the same confirm-first dialog the test cards open —
       // the delete itself happens only after the confirmation. (A СОС-тикет
@@ -1778,11 +1698,13 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   };
 
   // ── the first bottom bar (context action) ───────────────────────────────
-  // THE SPECIALIST'S BAR IS GONE: «Подать заявку» lives on the event card's
-  // own ladder now (under the role picker) — the bottom panel stays clean
-  // in BOTH libraries. The customer's «Пригласить на мероприятие» stands
-  // on the ПУБЛИЧНАЯ library and the floating windows only — the ЛИЧНАЯ
-  // (own events, nobody to invite) drops it too.
+  // «Пригласить на мероприятие» ALWAYS stands in the bottom panel for the
+  // customer — on every surface (main area, profile, bookmarks, chats,
+  // requests, floating panels) — and it is NEVER a dead button: with no
+  // specialist in sight it opens the public library (where specialist cards
+  // live), with no own events it leads to the event editor, with a role-less
+  // specialist it says so. The specialist mode keeps the contextual
+  // «Подать заявку» / «Пригласить» behavior.
   const barAction = (() => {
     // the MAP window keeps the frame but drops the context bar — the map has
     // its own floating «добавить спот» control; the chat page / checklist /
@@ -1818,16 +1740,21 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     }
     // the files / card-chat windows are floating PANELS now — the main area
     // (and the bar with it) stays visible while they are open; bookmarks /
-    // chats / requests windows keep the bar standing too.
+    // chats / requests windows keep the bar standing too («всегда в панели»)
     const mainVisible = topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat';
     if (!mainVisible && topWindow !== 'bookmarks' && topWindow !== 'chats' && topWindow !== 'requests') return null;
-    // THE SPECIALIST: no bottom action bar at all — «Подать заявку» sits on
-    // the event card itself (the ladder button under the role picker).
-    if (isSpecialist) return null;
-    // CUSTOMER MODE — the invite button stands on the ПУБЛИЧНАЯ library and
-    // the floating windows; the ЛИЧНАЯ библиотека (own events only — there
-    // is nobody to invite) drops it.
-    if (personal && mainVisible) return null;
+    if (isSpecialist) {
+      if (mainVisible && activeItem?.kind === 'event' && activeEvent && activeEvent.customerId !== myId) {
+        // Disabled only in the transient state «roles exist but none picked»
+        // (the picker defaults the first role instantly, so it never sticks);
+        // role-less specialists get a WORKING button that opens the post editor.
+        return { label: t('smmApplyBtn'), fn: applyFromCard, disabled: myRoles.length > 0 && !pickedApplyRole };
+      }
+      return null;
+    }
+    // CUSTOMER MODE — the invite button always stands: the active specialist
+    // card, the seen one (any surface), or the last viewed specialist —
+    // otherwise the button leads to the public library.
     const seen = activeCardId ? seenItemsRef.current[activeCardId] : null;
     const sp = activeSpecialist
       || (seen && seen.kind === 'specialist' ? seen : null)
