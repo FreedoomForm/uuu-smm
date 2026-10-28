@@ -630,6 +630,15 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
       <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('gFiles')} className={LADDER_BTN}>
         <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
       </Button>
+      {/* ПРИГЛАСИТЬ — a FOREIGN specialist card starts the invite RIGHT HERE:
+      the window opens with THIS specialist as the fixed target (the event is
+      picked inside it) — the customer never has to find the профиль first
+      (the user's cut). Own cards never carry it. */}
+      {ctx.onInvite && (
+        <Button size="sm" variant="outline" onClick={ctx.onInvite} title={t('smmInviteBtn')} className={LADDER_BTN}>
+          <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmInviteShort')}</span>
+        </Button>
+      )}
       {/* СКОПИРОВАТЬ ССЫЛКУ — the specialist card's link button (the customer's
       публичная библиотека): copies the ?specialist=<id> deep link that opens
       THIS specialist's profile window. */}
@@ -652,6 +661,7 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
         <SlideBtn onClick={ctx.onAi} icon={<Bot className="w-4 h-4 shrink-0" />} label={t('aiDiscuss')} tone={ctx.aiActive ? 'ai' : undefined} />
         <SlideBtn onClick={ctx.onChat} icon={<MessageCircle className="w-4 h-4 shrink-0" />} label={t('gChat')} />
         <SlideBtn onClick={ctx.onFiles} icon={<Paperclip className="w-4 h-4 shrink-0" />} label={t('gFiles')} />
+        {ctx.onInvite && <SlideBtn onClick={ctx.onInvite} icon={<Users className="w-4 h-4 shrink-0 text-cta" />} label={t('smmInviteShort')} />}
         <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('smmCopyLink')} />
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
       </>

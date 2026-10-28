@@ -1513,9 +1513,13 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     });
   };
   // the invite target from the CURRENT view (the bottom-panel button has no
-  // fixed target — the view decides): the profile window's user → the active
-  // specialist card → the last seen specialist
+  // fixed target — the view decides): the ACTIVE foreign ПОСТ card (the invite
+  // starts RIGHT from the пост — the user's cut) → the profile window's user →
+  // the active specialist card → the last seen specialist
   const inviteCtxSp = (): PickerSp | null => {
+    if (activeItem && activeItem.kind === 'post' && activeItem.specialistId !== myId) {
+      return { id: activeItem.specialistId, name: activeItem.specialist?.name || '', roles: [] };
+    }
     if (topWindow === 'profile' && profileData && profileData.user.roles.length > 0) {
       return { id: profileData.user.id, name: profileData.user.name, roles: profileData.user.roles };
     }
@@ -1530,6 +1534,17 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     const it = filtered[Math.min(Math.max(0, idx), filtered.length - 1)];
     if (it && it.id !== smmNow().activeCardId) useSmmStore.setState({ activeCardId: it.id });
   };
+  // THE VISIBLE SLIDE IS ALWAYS THE ACTIVE CARD — the swiper's onSlideChange
+  // alone left the INITIAL slide (and a re-filtered list) uncommitted, so the
+  // bottom-bar «Пригласить на мероприятие» dead-ended with the no-target hint
+  // while a specialist slide was RIGHT in front of the user. Commit the
+  // current index on mount and whenever the pick goes stale/absent.
+  useEffect(() => {
+    if (isGrid || filtered.length === 0) return;
+    if (filtered.some(x => x.id === activeCardId)) return;
+    commitSlide(smmSwiperRef.current && !smmSwiperRef.current.destroyed ? smmSwiperRef.current.activeIndex : 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGrid, filtered, activeCardId]);
 
   // The apply-role pick defaults itself while a FOREIGN мероприятие card is
   // active — one effect covers every activation path (a grid card tap, a
@@ -1815,9 +1830,14 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     // RIGHT from the card with THIS post's specialist as the fixed target
     // (roles load inside the window; the customer picks the event there) —
     // no профиль detour (the user's cut). Own posts never carry it.
+    // The SAME button lives on a FOREIGN СПЕЦИАЛИСТ card (the публичная
+    // библиотека slide/grid): the card IS the invite's start — the customer
+    // never has to hunt for the профиль first (the user's cut).
     onInvite: it.kind === 'post' && it.specialistId !== myId
       ? () => openInviteWindow({ id: it.specialistId, name: it.specialist?.name || '', roles: [] })
-      : undefined,
+      : it.kind === 'specialist' && it.id !== myId
+        ? () => openInviteWindow({ id: it.id, name: it.name, roles: it.roles })
+        : undefined,
     selected,
     onImageOpen: (url: string) => setImgPreview(url),
   });
@@ -2426,7 +2446,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           {...swiperParams}
           className="feed-swiper h-full screen-enter"
           initialSlide={Math.min(Math.max(0, activeIdx), Math.max(0, filtered.length - 1))}
-          onSwiper={sw => { smmSwiperRef.current = sw; }}
+          onSwiper={sw => { smmSwiperRef.current = sw; commitSlide(sw.activeIndex); }}
           onSlideChange={sw => commitSlide(sw.activeIndex)}
         >
           <FeedArrows
