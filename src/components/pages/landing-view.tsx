@@ -42,7 +42,7 @@ export default function LandingView({
           <span className="font-extrabold tracking-tight flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo-mark.svg" alt="ADposter" className="w-7 h-7 rounded-lg object-cover" />
-            <span><span className="text-cta">AD</span>poster</span>
+            <span><span className="text-brand">AD</span>poster</span>
           </span>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={cycleLang} className="rounded-full border-black h-9 px-4 font-bold">
