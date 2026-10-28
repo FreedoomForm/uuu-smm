@@ -33,6 +33,12 @@ jobs:
       # NOTE: ubuntu-latest runners ship the full Android SDK preinstalled
       # (ANDROID_HOME + accepted licenses); AGP auto-installs anything missing.
 
+      - name: Install Capacitor deps and sync android project
+        run: |
+          cd mobile
+          npm ci
+          npx cap sync android
+
       - name: Build release APK
         run: |
           cd mobile/android
