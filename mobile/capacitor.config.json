@@ -1,0 +1,9 @@
+{
+  "appId": "com.adposter.app",
+  "appName": "ADposter",
+  "webDir": "www",
+  "server": {
+    "url": "https://adposter.vercel.app",
+    "androidScheme": "https"
+  }
+}
