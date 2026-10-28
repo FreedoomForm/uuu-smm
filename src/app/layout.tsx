@@ -11,12 +11,13 @@ const bricolage = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  title: "uuu — платформа тестов",
+  title: "ADposter — платформа тестов",
   description: "Создавай тесты, делись версиями и расти: личная и общая библиотека, дерево версий, материалы и ИИ-репетитор — в одном месте.",
-  keywords: ["тесты", "quiz", "education", "uuu", "библиотека знаний", "версии"],
-  authors: [{ name: "uuu" }],
+  keywords: ["тесты", "quiz", "education", "adposter", "библиотека знаний", "версии"],
+  authors: [{ name: "ADposter" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo-icon.png",
+    apple: "/logo-icon.png",
   },
 };
 

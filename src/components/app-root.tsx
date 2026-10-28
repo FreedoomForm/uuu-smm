@@ -4142,7 +4142,6 @@ function AppRootInner({ authed, guestTest }: { authed: boolean; guestTest?: stri
         lang={lang}
         cycleLang={cycleLang}
         onEnter={() => setPage('auth')}
-        onMap={() => setPage('map')}
       />
     );
   }

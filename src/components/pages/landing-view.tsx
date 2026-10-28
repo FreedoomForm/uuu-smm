@@ -2,10 +2,11 @@
 
 // ---------------------------------------------------------------------------
 // LANDING — the public home of the ТУРИЗМ × SMM platform (the first screen
-// every guest sees instead of the old login card). The idea, the 4 pillars,
-// the three audiences, the CTA. Guests can also open the photo-spots map
-// WITHOUT an account — the SEO hook of the idea. (The old tools page became
-// the ИИ-агент inside the app; the catalog is the личная/публичная библиотека.)
+// every guest sees instead of the old login card). The idea, the pillars,
+// the three audiences, the CTA. (The photo-spots map is NOT on the landing
+// any more — the user's cut; it stays inside the app. The old tools page
+// became the ИИ-агент inside the app; the catalog is the личная/публичная
+// библиотека.)
 // ---------------------------------------------------------------------------
 
 import React from 'react';
@@ -13,26 +14,23 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { tUI, type Lang } from '@/lib/i18n';
 import {
-  Briefcase, Megaphone, Map as MapIcon, Wrench, Hotel, Camera, ArrowRight, Compass, Sparkles,
+  Briefcase, Megaphone, Wrench, Hotel, Camera, ArrowRight, Compass, Sparkles,
 } from 'lucide-react';
 
 export default function LandingView({
   lang,
   cycleLang,
   onEnter,
-  onMap,
 }: {
   lang: Lang;
   cycleLang: () => void;
   onEnter: () => void;
-  onMap: () => void;
 }) {
   const t = (key: string, vars?: Record<string, string | number>) => tUI(lang, key, vars);
 
   const pillars = [
     { icon: <Briefcase className="w-6 h-6" />, title: t('p1Title'), sub: t('p1Sub'), color: 'bg-[#E3EEFF]', fg: 'text-blue-700' },
     { icon: <Megaphone className="w-6 h-6" />, title: t('p2Title'), sub: t('p2Sub'), color: 'bg-[#FFE3D6]', fg: 'text-orange-700' },
-    { icon: <MapIcon className="w-6 h-6" />, title: t('p3Title'), sub: t('p3Sub'), color: 'bg-[#DFF3E8]', fg: 'text-emerald-700' },
     { icon: <Wrench className="w-6 h-6" />, title: t('p4Title'), sub: t('p4Sub'), color: 'bg-[#FFF0D9]', fg: 'text-amber-700' },
   ];
 
@@ -42,7 +40,9 @@ export default function LandingView({
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <span className="font-extrabold tracking-tight flex items-center gap-2">
-            <Compass className="w-5 h-5 text-cta" /> UUU
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="ADposter" className="w-7 h-7 rounded-lg object-cover" />
+            <span><span className="text-cta">AD</span>poster</span>
           </span>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={cycleLang} className="rounded-full border-black h-9 px-4 font-bold">
@@ -71,13 +71,10 @@ export default function LandingView({
             <Button onClick={onEnter} className="h-12 px-8 rounded-full bg-cta hover:bg-cta/90 text-white text-base font-bold shadow-lg">
               {t('landingCta')} <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
-            <Button variant="outline" onClick={onMap} className="h-12 px-6 rounded-full border-2 border-black font-bold">
-              <MapIcon className="w-4 h-4 mr-2" /> {t('navMap')}
-            </Button>
           </div>
         </section>
 
-        {/* 4 PILLARS */}
+        {/* PILLARS */}
         <section className="max-w-5xl mx-auto px-4 pb-10">
           <h2 className="text-xl sm:text-2xl font-extrabold text-center mb-6">{t('landingPillars')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
