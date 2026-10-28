@@ -235,6 +235,7 @@ export const api = {
   updatePost: (id: string, data: { description?: string; media?: unknown; attachments?: unknown; roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; coverColor?: string | null; coverIcon?: string | null; isPublic?: boolean; tags?: string[]; coverUrl?: string | null; tasks?: { label: string; desc: string }[] }) =>
     apiFetch(`/smm/posts/${id}`, { method: 'PUT', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmPostT>,
   deletePost: (id: string) => apiFetch(`/smm/posts/${id}`, { method: 'DELETE' }),
+  getPost: (id: string) => apiFetch(`/smm/posts/${id}`) as Promise<{ post: import('@/lib/app-types').SmmPostT }>,
 
   // Events (the customer's личная библиотека / the specialist's публичная):
   // the 4 facts (format, platform/location, time) + qualification tests.

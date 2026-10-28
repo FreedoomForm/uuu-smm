@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CreatorStrip, tagHash } from '@/components/shared-bits';
 import { eventPlatformIcon, eventPlatformLabel, fmtMoney, mapEmbedUrl, mediaSrc } from './smm-bits';
-import { CalendarClock, ChevronRight, ClipboardList, Bot, Briefcase, Film, Handshake, LayoutGrid, Link2, MapPin, Megaphone, MessageCircle, Paperclip, Pencil, Sparkles, Star, Trash2, Users, Wallet } from 'lucide-react';
+import { CalendarClock, ChevronRight, ClipboardList, Bot, Briefcase, Film, Globe, Handshake, LayoutGrid, Link2, MapPin, Megaphone, MessageCircle, Paperclip, Pencil, Sparkles, Star, Trash2, Users, Wallet } from 'lucide-react';
 import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
 
 export type CardVariant = 'grid' | 'shelf' | 'slide' | 'feed';
@@ -50,10 +50,13 @@ export interface CardCtx {
   // «Прикреплённые файлы (N)» — the event's qualification tests / the post's
   // media collection (the card renders the button when ITS count > 0)
   onFiles: () => void;
-  // «Опубликовать / Снять с публикации» — OWN мероприятие cards (the same
-  // Public level the own test cards keep)
+  // «Опубликовать в общую библиотеку» / «Опубликовать только тем, у кого
+  // есть ссылка» — the PUBLISH PAIR on OWN мероприятие/пост cards in the
+  // личная библиотека: the active mode LITS its button and every tap copies
+  // the matching link (the link IS the access for the second mode).
   isPublic?: boolean;
-  onPublic?: () => void;
+  onPubPublic?: () => void;
+  onPubLink?: () => void;
   // event card (specialist side)
   myRoles: { id: string; name: string }[];
   pickedRole: string | null;
@@ -71,6 +74,8 @@ export interface CardCtx {
 const LADDER_BTN = 'h-7 rounded-full border-black text-[10px] sm:text-[11px] lg:h-9 lg:text-xs px-1.5 justify-start gap-1 has-[>svg]:px-1';
 // The AI button wears the test card's active look when its window is open
 const LADDER_AI_ACTIVE = 'border-primary bg-[#FFE8DE]';
+// The PUBLISH PAIR's lit state — the chosen visibility mode «загорается»
+const LADDER_PUB_ACTIVE = 'border-cta bg-cta text-white hover:bg-cta/90 hover:text-white';
 
 // ── THE FEED CARD ANATOMY — byte-for-byte the test feed card's: the title
 // lives on the colour SPINE (the narrow left band), the content column
@@ -101,14 +106,16 @@ function SlideBtn({ onClick, icon, label, tone, disabled }: {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
-  tone?: 'ai' | 'danger';
+  tone?: 'ai' | 'danger' | 'pub';
   disabled?: boolean;
 }) {
   const toneCls = tone === 'ai'
     ? 'border-primary bg-[#FFE8DE]'
     : tone === 'danger'
       ? 'border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive'
-      : 'border-black bg-white hover:bg-muted/50';
+      : tone === 'pub'
+        ? 'border-cta bg-cta text-white hover:bg-cta/90'
+        : 'border-black bg-white hover:bg-muted/50';
   return (
     <button
       type="button"
@@ -273,6 +280,9 @@ export function EventFacts({ event, t, compact, feed }: { event: SmmEventT; t: C
 export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; variant: CardVariant; ctx: CardCtx }) {
   const { t, myId } = ctx;
   const own = event.customerId === myId;
+  // the publish pair renders only when BOTH handlers arrived (they always
+  // travel together from the ctx builder)
+  const pubPair = own && !event.parentId && !!ctx.onPubPublic && !!ctx.onPubLink;
   const bgStyle = event.coverColor ? { backgroundColor: event.coverColor } : undefined;
   const bgClass = event.coverColor ? '' : 'bg-[#E3EEFF]';
   const showRolePicker = !own && ctx.myRoles.length > 0;
@@ -309,15 +319,23 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
       <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: (event.tests || []).length + ((event.attachments || []).length) })} className={LADDER_BTN}>
         <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
       </Button>
-      <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
-        <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
-      </Button>
-      {/* The Public level (the own test cards keep it) — a VERSION (a copy
-      of somebody's мероприятие) never wears it: like the tests, a version
-      can never be made public (the server coerces the flag too). */}
-      {own && !event.parentId && (
-        <Button size="sm" variant="outline" onClick={ctx.onPublic} title={t('makePublic')} className={LADDER_BTN}>
-          <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
+      {/* THE PUBLISH PAIR — an OWN карточка in the личная библиотека:
+      «Опубликовать в общую библиотеку» / «Опубликовать только тем, у кого
+      есть ссылка». The chosen mode LITS its button and EVERY tap copies the
+      matching link. A VERSION (a copy of somebody's заказ) keeps the plain
+      «Ссылка» — the server coerces a version's isPublic to false anyway. */}
+      {pubPair ? (
+        <>
+          <Button size="sm" variant="outline" onClick={ctx.onPubPublic} title={t('smmPubPublic')} className={`${LADDER_BTN} ${ctx.isPublic ? LADDER_PUB_ACTIVE : ''}`}>
+            <Globe className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmPubPublicBtn')}</span>
+          </Button>
+          <Button size="sm" variant="outline" onClick={ctx.onPubLink} title={t('smmPubLink')} className={`${LADDER_BTN} ${ctx.isPublic ? '' : LADDER_PUB_ACTIVE}`}>
+            <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmPubLinkBtn')}</span>
+          </Button>
+        </>
+      ) : (
+        <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
+          <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
         </Button>
       )}
       {ctx.onEdit && (
@@ -347,9 +365,13 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
         <SlideBtn onClick={ctx.onAi} icon={<Bot className="w-4 h-4 shrink-0" />} label={t('aiDiscuss')} tone={ctx.aiActive ? 'ai' : undefined} />
         <SlideBtn onClick={ctx.onChat} icon={<MessageCircle className="w-4 h-4 shrink-0" />} label={t('gChat')} />
         <SlideBtn onClick={ctx.onFiles} icon={<Paperclip className="w-4 h-4 shrink-0" />} label={t('attachedFiles', { n: (event.tests || []).length + ((event.attachments || []).length) })} />
-        <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('gShare')} />
-        {own && !event.parentId && (
-          <SlideBtn onClick={ctx.onPublic || (() => {})} icon={<Users className="w-4 h-4 shrink-0 text-primary" />} label={t('gPublic')} />
+        {pubPair ? (
+          <>
+            <SlideBtn onClick={ctx.onPubPublic!} icon={<Globe className="w-4 h-4 shrink-0 text-cta" />} label={t('smmPubPublic')} tone={ctx.isPublic ? 'pub' : undefined} />
+            <SlideBtn onClick={ctx.onPubLink!} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('smmPubLink')} tone={ctx.isPublic ? undefined : 'pub'} />
+          </>
+        ) : (
+          <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('gShare')} />
         )}
         {ctx.onEdit && <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />}
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
@@ -437,6 +459,9 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
 export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; variant: CardVariant; ctx: CardCtx }) {
   const { t, myId } = ctx;
   const own = post.specialistId === myId;
+  // the publish pair renders only when BOTH handlers arrived (they always
+  // travel together from the ctx builder)
+  const pubPair = own && !post.parentId && !!ctx.onPubPublic && !!ctx.onPubLink;
   const bgStyle = post.coverColor ? { backgroundColor: post.coverColor } : undefined;
   const bgClass = post.coverColor ? '' : 'bg-[#DFF3E8]';
   const media = (post.media || []) as { url: string; type: string }[];
@@ -453,15 +478,21 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
       <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length + ((post.attachments || []).length) })} className={LADDER_BTN}>
         <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
       </Button>
-      <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
-        <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
-      </Button>
-      {/* The Public level — the SAME level the own заказ/test cards keep:
-      publishing an автопост (or any own post) puts it on the specialist's
-      profile. A VERSION never wears it. */}
-      {own && !post.parentId && (
-        <Button size="sm" variant="outline" onClick={ctx.onPublic} title={t('makePublic')} className={LADDER_BTN}>
-          <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gPublic')}</span>
+      {/* THE PUBLISH PAIR — the SAME pair the заказ card keeps, on the
+      specialist's own пост in the личная библиотека (a VERSION keeps the
+      plain «Ссылка» — the server coerces its isPublic to false). */}
+      {pubPair ? (
+        <>
+          <Button size="sm" variant="outline" onClick={ctx.onPubPublic} title={t('smmPubPublic')} className={`${LADDER_BTN} ${ctx.isPublic ? LADDER_PUB_ACTIVE : ''}`}>
+            <Globe className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmPubPublicBtn')}</span>
+          </Button>
+          <Button size="sm" variant="outline" onClick={ctx.onPubLink} title={t('smmPubLink')} className={`${LADDER_BTN} ${ctx.isPublic ? '' : LADDER_PUB_ACTIVE}`}>
+            <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmPubLinkBtn')}</span>
+          </Button>
+        </>
+      ) : (
+        <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
+          <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
         </Button>
       )}
       {ctx.onEdit && (
@@ -510,9 +541,13 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         <SlideBtn onClick={ctx.onAi} icon={<Bot className="w-4 h-4 shrink-0" />} label={t('aiDiscuss')} tone={ctx.aiActive ? 'ai' : undefined} />
         <SlideBtn onClick={ctx.onChat} icon={<MessageCircle className="w-4 h-4 shrink-0" />} label={t('gChat')} />
         <SlideBtn onClick={ctx.onFiles} icon={<Paperclip className="w-4 h-4 shrink-0" />} label={t('attachedFiles', { n: media.length + ((post.attachments || []).length) })} />
-        <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('gShare')} />
-        {own && !post.parentId && (
-          <SlideBtn onClick={ctx.onPublic || (() => {})} icon={<Users className="w-4 h-4 shrink-0 text-primary" />} label={t('gPublic')} />
+        {pubPair ? (
+          <>
+            <SlideBtn onClick={ctx.onPubPublic!} icon={<Globe className="w-4 h-4 shrink-0 text-cta" />} label={t('smmPubPublic')} tone={ctx.isPublic ? 'pub' : undefined} />
+            <SlideBtn onClick={ctx.onPubLink!} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('smmPubLink')} tone={ctx.isPublic ? undefined : 'pub'} />
+          </>
+        ) : (
+          <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('gShare')} />
         )}
         {ctx.onEdit && <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />}
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />

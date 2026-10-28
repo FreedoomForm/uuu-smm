@@ -65,6 +65,12 @@ import { ResizableSheetFrame } from '@/components/resize-sheet';
 import { SheetHeaderSwitcher } from '@/components/sheet-switcher';
 import type { SheetOption } from '@/components/pages/take-test/sheet-config';
 import { SmmEventForm, SmmPostForm, type SmmFormHandle } from './smm-editors';
+import type { PickerSp } from './smm-pickers';
+// THE PICKER WINDOWS — «Пригласить на мероприятие» (the customer picks the
+// event) / «Подать запрос» (the specialist picks the post): the permanent
+// bottom-panel buttons and the chat rows open them OVER the current view.
+const SmmInviteWindow = dynamic(() => import('./smm-pickers').then(m => m.SmmInviteWindow), { ssr: false, loading: () => null });
+const SmmApplyWindow = dynamic(() => import('./smm-pickers').then(m => m.SmmApplyWindow), { ssr: false, loading: () => null });
 
 // One AI conversation about one SMM card (persisted in localStorage — the
 // same deal the test dashboard's threads keep, but scoped to the SMM page)
@@ -371,6 +377,16 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   // not only from the current dashboard list (the profile-window cards are
   // NOT in `items`).
   const seenItemsRef = useRef<Record<string, AnyItem>>({});
+  // THE DEEP LINK (?event=<id> / ?post=<id>) — the link the «Ссылка» /
+  // «Опубликовать…» buttons copy. The fetched card is appended to every
+  // library refresh (applyLists) and selected — a link-only карточка
+  // (isPublic=false) opens for exactly those who have the link.
+  const deepItemRef = useRef<AnyItem | null>(null);
+  // THE PICKER WINDOWS («Пригласить на мероприятие» / «Подать запрос») —
+  // the PERMANENT bottom-panel buttons open them over the current view; the
+  // chat rows pass the chat peer as the context.
+  const [inviteWin, setInviteWin] = useState<{ sp: PickerSp | null } | null>(null);
+  const [applyWin, setApplyWin] = useState<{ peerId: string | null; preEventId: string | null; preRoleId: string | null } | null>(null);
 
   // ── «Обсудить с ИИ» window state (per-card threads in localStorage) ──
   const [aiOpen, setAiOpen] = useState(false);
@@ -409,6 +425,10 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
         ? d.evs.items.map((e: any) => ({ ...e, kind: 'event' as const }))
         : d.specialists.items.map((s: any) => ({ ...s, kind: 'specialist' as const }));
     }
+    // the deep-link card survives every refresh (a link-only заказ/пост is
+    // never in the library lists — the link IS its access)
+    const deep = deepItemRef.current;
+    if (deep && !list.some(x => x.id === deep.id)) list = [...list, deep];
     setItems(list);
   }, [isSpecialist, personal]);
 
@@ -866,6 +886,20 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     } catch { toast(url); }
   };
 
+  // «Опубликовать в общую библиотеку» / «Опубликовать только тем, у кого
+  // есть ссылка» — the card's publish pair: the visibility saves, the
+  // matching link copies («нужная ссылка скопируется») and the card
+  // reloads — the lit button follows isPublic. The deep link (?event=/?post=)
+  // makes the second mode real: whoever has the link opens the card.
+  const setPubState = async (kind: 'event' | 'post', id: string, isPublic: boolean) => {
+    try {
+      if (kind === 'event') await api.updateEvent(id, { isPublic });
+      else await api.updatePost(id, { isPublic });
+      void doShare(kind, id);
+      bumpAndReload();
+    } catch (e: any) { toast(e?.message || 'Error'); }
+  };
+
   // ── THE EDIT WINDOW TARGET («Изменить» from an own card in the личная
   // библиотека) — the SAME resizable-sheet editor the test cards open. Own
   // мероприятие/пост opens in the window directly; anything else never wears
@@ -1027,20 +1061,14 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     } catch (e: any) { toast(e?.message || 'Error'); }
   };
 
-  // ── ЧАТ: «Пригласить на мероприятие» — the customer invites the chat peer
-  // right from the dialog: the profile's roles seed the invite flow, the
-  // EVENT PICKER on the invite screen picks the event, and the picked event
-  // lands as the ПРИГЛАШЕНИЕ message in THIS chat.
-  const invitePeerFromChat = async (peerId: string, peerName: string) => {
+  // ── ЧАТ: «Пригласить на мероприятие» (customer) / «Подать запрос»
+  // (specialist) — the PERMANENT rows above the chat input open the PICKER
+  // WINDOW with the chat peer as the context: the customer picks the event,
+  // the specialist picks the post — the ПРИГЛАШЕНИЕ#/ЗАЯВКА# message lands
+  // right back in THIS dialog (the user never leaves the chat).
+  const openInviteWindowForPeer = (peerId: string, peerName: string) => {
     if (!peerId) return;
-    setBusy(true);
-    try {
-      const prof = await api.getSmmProfile(peerId).catch(() => null);
-      const roles = (prof?.user?.roles || []) as SmmRoleT[];
-      if (roles.length === 0) { toast(t('smmInviteNoRoles')); return; }
-      useSmmStore.setState({ topWindow: 'none', openChatId: null, chatPage: null });
-      inviteFrom({ id: peerId, name: peerName || (prof?.user?.name || ''), roles }, smmNow().pickedInviteEvent, smmNow().pickedInviteRole);
-    } finally { setBusy(false); }
+    setInviteWin({ sp: { id: peerId, name: peerName || '', roles: [] } });
   };
 
   // ── ЧАТ-СТРАНИЦА — find-or-create the direct dialog and open the fullscreen
@@ -1483,29 +1511,37 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     } catch (e: any) { toast(e?.message || 'Error'); } finally { setReviewBusy(false); }
   };
 
-  // «Подать заявку» — now the event CARD's own ladder button (the bottom-bar
-  // one is gone): the card passes ITSELF, so the button always binds to the
-  // exact мероприятие it sits on — public library, bookmarks, any surface.
-  const applyFromCard = (ev?: SmmEventT) => {
-    const event = ev || activeEvent;
-    if (!event) return;
-    // The button ALWAYS works: a specialist without any role yet is led to
-    // the post editor — the role (+ prices) is born there, then the заявка
-    // can be sent. Never a dead disabled button.
+  // ── THE PICKER WINDOW OPENERS — the PERMANENT bottom-panel buttons open
+  // the selection windows (NO page navigation): the customer picks the
+  // EVENT, the specialist picks the POST — the picked one lands in the
+  // direct chat (ПРИГЛАШЕНИЕ#/ЗАЯВКА#). Every context seeds the invite
+  // target (the profile window's user → the active specialist card → the
+  // last seen one); a chat context passes the peer. A role-less specialist
+  // is led to the post editor — the role is born there (never a dead
+  // button).
+  const openInviteWindow = (sp: PickerSp | null) => setInviteWin({ sp: sp || null });
+  const openApplyWindow = (peerId: string | null) => {
     if (myRoles.length === 0) {
       toast(t('smmApplyNeedRole'));
       useSmmStore.setState({ editingId: null });
       setPage('smm-post-editor');
       return;
     }
-    // heal a stale pick (a deleted role) — the first own role applies
-    const roleId = myRoles.find(r => r.id === pickedApplyRole)?.id || myRoles[0]?.id || '';
-    if (!roleId) return;
-    useSmmStore.setState({
-      applyCtx: { eventId: event.id, roleId, testIds: event.testIds || [] },
-      inviteCtx: null,
+    setApplyWin({
+      peerId,
+      preEventId: activeEvent && activeEvent.customerId !== myId ? activeEvent.id : null,
+      preRoleId: pickedApplyRole,
     });
-    setPage('smm-apply');
+  };
+  // the invite target from the CURRENT view (the bottom-panel button has no
+  // fixed target — the view decides): the profile window's user → the active
+  // specialist card → the last seen specialist
+  const inviteCtxSp = (): PickerSp | null => {
+    if (topWindow === 'profile' && profileData && profileData.user.roles.length > 0) {
+      return { id: profileData.user.id, name: profileData.user.name, roles: profileData.user.roles };
+    }
+    if (activeSpecialist) return { id: activeSpecialist.id, name: activeSpecialist.name, roles: activeSpecialist.roles };
+    return lastSpRef.current;
   };
 
   // Приглашение: примерная сумма depends on the EVENT's format — онлайн =
@@ -1538,30 +1574,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     setPage('smm-invite');
   };
 
-  // The invite button's single entry — NEVER dead: every «nothing to pick»
-  // case leads somewhere useful instead of sitting disabled.
-  const inviteClick = (sp: { id: string; name: string; roles: SmmRoleT[] } | null) => {
-    if (!sp) {
-      // no specialist in sight — the public library is where they live
-      toast(t('smmInvitePickSpecialist'));
-      gotoLibrary(true);
-      return;
-    }
-    if (!sp.roles || sp.roles.length === 0) {
-      // the invite needs a role only the specialist can create
-      toast(t('smmInviteNoRoles'));
-      return;
-    }
-    if (myEvents.length === 0) {
-      // no event to invite to — the event editor is one tap away
-      toast(t('smmInviteNoEvent'));
-      useSmmStore.setState({ editingId: null });
-      setPage('smm-event-editor');
-      return;
-    }
-    inviteFrom(sp, pickedInviteEvent, pickedInviteRole);
-  };
-
   // feed slide commit — the SAME contract the tests feed keeps: the visible
   // slide IS the active card (the bottom-bar заявка/приглашение action binds
   // to it).
@@ -1586,6 +1598,40 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       useSmmStore.setState({ pickedApplyRole: myRoles[0].id });
     }
   }, [activeEventId, pickedApplyRole, myRoles, isSpecialist, myId]);
+
+  // ── THE DEEP LINK (?event=<id> / ?post=<id>) — the link the «Ссылка» and
+  // «Опубликовать…» buttons copy. Opening it fetches the card (getEvent /
+  // getPost do NOT gate on isPublic — the link IS the access for the
+  // «опубликовать только тем, у кого есть ссылка» mode), appends it to the
+  // current library (applyLists keeps it through every refresh) and selects
+  // it. The param is cleaned from the URL so a reload does not re-append.
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const evId = q.get('event');
+      const poId = q.get('post');
+      if (!evId && !poId) return;
+      window.history.replaceState({}, '', window.location.pathname);
+      const adopt = (item: AnyItem) => {
+        deepItemRef.current = item;
+        seenItemsRef.current[item.id] = item;
+        setItems(prev => (prev.some(x => x.id === item.id) ? prev : [...prev, item]));
+        useSmmStore.setState({ activeCardId: item.id });
+      };
+      if (evId) {
+        api.getEvent(evId).then((r: any) => {
+          const ev = r?.event;
+          if (ev) adopt({ ...ev, kind: 'event' } as AnyItem);
+        }).catch(() => { /* a dead link stays silent */ });
+      } else if (poId) {
+        api.getPost(poId).then((r: any) => {
+          const p = r?.post;
+          if (p) adopt({ ...p, kind: 'post' } as AnyItem);
+        }).catch(() => { /* a dead link stays silent */ });
+      }
+    } catch { /* noop */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Wheel gate: events originating inside an inner scrollable (the slide's
   // white content card) keep their NATIVE scrolling — stopped here in the
@@ -1751,21 +1797,20 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       }
     },
     isPublic: it.kind === 'event' ? (it as SmmEventT).isPublic : it.kind === 'post' ? (it as SmmPostT).isPublic : undefined,
-    onPublic: () => {
-      if (it.kind === 'event') {
-        api.updateEvent(it.id, { isPublic: !(it as SmmEventT).isPublic })
-          .then(() => { toast(t('smmEventSaved')); bumpAndReload(); })
-          .catch((e: any) => toast(e?.message || 'Error'));
-        return;
-      }
-      if (it.kind === 'post') {
-        // «Публичная» on an own post: publishing (an автопост included) puts
-        // it on the specialist's profile — the personal library keeps it too
-        api.updatePost(it.id, { isPublic: !(it as SmmPostT).isPublic })
-          .then(() => { toast(t('smmPostSaved')); bumpAndReload(); })
-          .catch((e: any) => toast(e?.message || 'Error'));
-      }
-    },
+    // THE PUBLISH PAIR — only an OWN non-version карточка in the ЛИЧНАЯ
+    // библиотека carries it (the публичная keeps the plain «Ссылка»):
+    onPubPublic: (() => {
+      if (!personal) return undefined;
+      if (it.kind === 'event' && it.customerId === myId && !(it as SmmEventT).parentId) return () => { void setPubState('event', it.id, true); };
+      if (it.kind === 'post' && it.specialistId === myId && !(it as SmmPostT).parentId) return () => { void setPubState('post', it.id, true); };
+      return undefined;
+    })(),
+    onPubLink: (() => {
+      if (!personal) return undefined;
+      if (it.kind === 'event' && it.customerId === myId && !(it as SmmEventT).parentId) return () => { void setPubState('event', it.id, false); };
+      if (it.kind === 'post' && it.specialistId === myId && !(it as SmmPostT).parentId) return () => { void setPubState('post', it.id, false); };
+      return undefined;
+    })(),
     onChat: () => {
       // «Чат» on the card = the per-card GROUP CHAT WINDOW — everyone's chat
       // about THIS card, the exact mechanic the test cards keep. One window
@@ -1846,14 +1891,14 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     setBusy(false);
   };
 
-  // ── the first bottom bar (context action) ───────────────────────────────
-  // «Подать заявку» stands in the bottom panel of the ПУБЛИЧНАЯ library for
-  // the specialist — the active foreign мероприятие card defines the action
-  // (the role is picked by the chips ON the card, the button submits).
-  // The customer's «Пригласить на мероприятие» stands on the ПУБЛИЧНАЯ
-  // library and the floating windows only — the ЛИЧНАЯ (own events, nobody
-  // to invite) drops it.
-  const barAction = (() => {
+  // ── the first bottom bar (the PERMANENT pair) ───────────────────────────
+  // «Подать запрос» (specialist) / «Пригласить на мероприятие» (customer)
+  // ALWAYS stand in the bottom panel — every window of the main view keeps
+  // them. Pressing opens the PICKER WINDOW over the current view (the
+  // customer selects the event, the specialist selects the post) — the
+  //picked one lands in the direct chat. Only the map / chat page / checklist
+  // / admin windows and an open dialog keep their own bottom bars instead.
+  const barAction: { label: string; fn: () => void; disabled?: boolean } | null = (() => {
     // the MAP window keeps the frame but drops the context bar — the map has
     // its own floating «добавить спот» control; the chat page / checklist /
     // admin windows carry their own bottom bars instead. An OPEN DIALOG in
@@ -1872,48 +1917,18 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       if (at && personal && at.status === 'accepted' && at.chatId) return { label: t('smmAdminOpenChat'), fn: () => adminOpenTicketChat(at) };
       return null;
     }
-    // the profile window: a customer invites the viewed specialist right
-    // from here (the same пригласить bar the specialist card carries)
-    if (topWindow === 'profile') {
-      if (isSpecialist) return null;
-      // while the profile loads the invite target is unknown — an honest
-      // transient disable (the real states never disable: data arrived →
-      // the button invites; role-less user → the hint toast)
-      if (profileLoading) return { label: t('smmInviteBtn'), disabled: true, fn: () => {} };
-      if (profileData && profileData.user.roles.length > 0) {
-        const profileSp = { id: profileData.user.id, name: profileData.user.name, roles: profileData.user.roles };
-        return { label: t('smmInviteBtn'), fn: () => inviteClick(profileSp) };
-      }
-      return { label: t('smmInviteBtn'), fn: () => toast(t('smmInviteNoRoles')) };
-    }
-    // the files / card-chat windows are floating PANELS now — the main area
-    // (and the bar with it) stays visible while they are open; bookmarks /
-    // chats / requests windows keep the bar standing too.
-    const mainVisible = topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat';
-    if (!mainVisible && topWindow !== 'bookmarks' && topWindow !== 'chats' && topWindow !== 'requests') return null;
-    // THE SPECIALIST: the contextual «Подать заявку» — the bottom-panel
-    // button over a foreign мероприятие card (публичная библиотека /
-    // bookmarks): the role chips on the card pick the role, the bar
-    // submits. Disabled only in the transient state «roles exist but none
-    // picked» (the picker defaults the first role instantly, so it never
-    // sticks); role-less specialists get a WORKING button that opens the
-    // post editor (the role is born there).
-    if (isSpecialist) {
-      if (mainVisible && activeItem?.kind === 'event' && activeEvent && activeEvent.customerId !== myId) {
-        return { label: t('smmApplyBtn'), fn: applyFromCard, disabled: myRoles.length > 0 && !pickedApplyRole };
-      }
-      return null;
-    }
-    // CUSTOMER MODE — the invite button stands on the ПУБЛИЧНАЯ library and
-    // the floating windows; the ЛИЧНАЯ библиотека (own events only — there
-    // is nobody to invite) drops it.
-    if (personal && mainVisible) return null;
-    const seen = activeCardId ? seenItemsRef.current[activeCardId] : null;
-    const sp = activeSpecialist
-      || (seen && seen.kind === 'specialist' ? seen : null)
-      || lastSpRef.current
-      || null;
-    return { label: t('smmInviteBtn'), fn: () => inviteClick(sp) };
+    // ── THE PERMANENT PAIR — «Подать запрос» (specialist) / «Пригласить на
+    // мероприятие» (customer) ALWAYS stands in the bottom panel: the main
+    // area, the floating panels AND every window keep it (the old
+    // contextual hiding — личная drops the invite, an active card required
+    // for the заявка — is gone). Pressing OPENS THE PICKER WINDOW over the
+    // current view: the customer selects the EVENT, the specialist selects
+    // the POST (no page navigation anywhere).
+    const barVisible = topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat'
+      || topWindow === 'bookmarks' || topWindow === 'chats' || topWindow === 'requests' || topWindow === 'profile';
+    if (!barVisible) return null;
+    if (isSpecialist) return { label: t('smmApplyBtn'), fn: () => openApplyWindow(null) };
+    return { label: t('smmInviteBtn'), fn: () => openInviteWindow(inviteCtxSp()) };
   })();
 
   // ── window contents ─────────────────────────────────────────────────────
@@ -1963,10 +1978,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       // page (top panel + bottom docks) — the messages fill the middle, the
       // input sits on its own bar above the library dock. Realtime = the
       // long-poll loop (~1s delivery). Tapping the header peer → profile.
-      // The CUSTOMER's invite row: «Пригласить на мероприятие» above the
-      // input while the deal is not active (no deal / declined / cancelled).
-      const pageDeal = chatMeta[chatPage.chatId]?.deal;
-      const showInviteRow = !isSpecialist && chatPage.peerId && (!pageDeal || pageDeal.status === 'declined' || pageDeal.status === 'cancelled');
+      // THE PERMANENT PAIR above the input: the customer's «Пригласить на
+      // мероприятие» + the specialist's «Подать запрос» — always standing,
+      // each opens the picker window with the chat peer as the context.
       return (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
@@ -1979,11 +1993,18 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           {renderDealBar(chatPage.chatId)}
           <div className="desktop-dock desktop-dock-raised shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
             <div className="max-w-2xl mx-auto px-3 py-2 flex flex-col gap-2">
-              {showInviteRow && (
+              {!isSpecialist && chatPage.peerId && (
                 <Button size="sm" variant="outline" disabled={busy}
-                  onClick={() => void invitePeerFromChat(chatPage.peerId, chatPage.peerName)}
+                  onClick={() => openInviteWindowForPeer(chatPage.peerId, chatPage.peerName)}
                   className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
                   <Users className="w-3.5 h-3.5" /> {t('smmChatInviteCta')}
+                </Button>
+              )}
+              {isSpecialist && chatPage.peerId && (
+                <Button size="sm" variant="outline" disabled={busy}
+                  onClick={() => openApplyWindow(chatPage.peerId)}
+                  className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
+                  <Link2 className="w-3.5 h-3.5" /> {t('smmApplyBtn')}
                 </Button>
               )}
               <div className="flex gap-2">
@@ -2247,8 +2268,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
         if (openChatId) {
           const chat = chats.find(c => c.id === openChatId);
           const dlgPeerId = chat?.peer?.id || '';
-          const dlgDeal = chatMeta[openChatId]?.deal;
-          const dlgShowInvite = !isSpecialist && !!dlgPeerId && (!dlgDeal || dlgDeal.status === 'declined' || dlgDeal.status === 'cancelled');
           return (
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
@@ -2261,11 +2280,20 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
               {renderDealBar(openChatId)}
               <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-3 py-2" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
                 <div className="max-w-2xl mx-auto flex flex-col gap-2">
-                  {dlgShowInvite && (
+                  {/* THE PERMANENT PAIR in the dialog — the same two rows the
+                  chat page keeps: invite (customer) / заявка (specialist) */}
+                  {!isSpecialist && dlgPeerId && (
                     <Button size="sm" variant="outline" disabled={busy}
-                      onClick={() => void invitePeerFromChat(dlgPeerId, chat?.title || '')}
+                      onClick={() => openInviteWindowForPeer(dlgPeerId, chat?.title || '')}
                       className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
                       <Users className="w-3.5 h-3.5" /> {t('smmChatInviteCta')}
+                    </Button>
+                  )}
+                  {isSpecialist && dlgPeerId && (
+                    <Button size="sm" variant="outline" disabled={busy}
+                      onClick={() => openApplyWindow(dlgPeerId)}
+                      className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
+                      <Link2 className="w-3.5 h-3.5" /> {t('smmApplyBtn')}
                     </Button>
                   )}
                   <div className="flex gap-2">
@@ -2603,7 +2631,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       {/* ── MAIN ── */}
       {renderMainWindow()}
 
-      {/* ── BAR 1: the context action (Подать заявку / Пригласить).
+      {/* ── BAR 1: the PERMANENT pair — «Подать запрос» (specialist) /
+      «Пригласить на мероприятие» (customer). Pressing OPENS THE PICKER
+      WINDOW (the event/post selection) — no page navigation. admin —
       desktop-dock-raised: the SMM dashboard stacks TWO docks — the library
       dock at the very bottom and this bar above it — without the raise the
       bar paints OVER the library dock. (The third dock — the role switcher —
@@ -2619,9 +2649,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       {barAction && (
         <div className="desktop-dock desktop-dock-raised shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
           <div className="max-w-2xl mx-auto px-4 pt-3 pb-3">
-            {/* no args: applyFromCard(ev?) must NOT receive the click event —
-            the bar always acts on the ACTIVE мероприятие */}
-            <Button onClick={() => barAction.fn()} disabled={'disabled' in barAction && barAction.disabled} className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-cta hover:bg-cta/90 text-white">
+            <Button onClick={() => barAction.fn()} disabled={!!barAction.disabled} className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-cta hover:bg-cta/90 text-white">
               {barAction.label}
             </Button>
           </div>
@@ -2874,6 +2902,31 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           />
         );
       })()}
+      {/* ── THE PICKER WINDOWS — «Пригласить на мероприятие» (the customer
+      picks the EVENT) / «Подать запрос» (the specialist picks the POST):
+      the PERMANENT bottom-panel buttons and the chat rows open them over
+      the current view; the picked one lands in the direct chat as the
+      ПРИГЛАШЕНИЕ#/ЗАЯВКА# message. */}
+      {inviteWin && (
+        <SmmInviteWindow
+          open
+          onClose={() => setInviteWin(null)}
+          t={t}
+          sp={inviteWin.sp}
+          onSent={() => { bumpAndReload(); }}
+        />
+      )}
+      {applyWin && (
+        <SmmApplyWindow
+          open
+          onClose={() => setApplyWin(null)}
+          t={t}
+          peerId={applyWin.peerId}
+          preEventId={applyWin.preEventId}
+          preRoleId={applyWin.preRoleId}
+          onSent={() => { bumpAndReload(); }}
+        />
+      )}
       {/* ── MY PROFILE — the avatar's «всплывающая снизу страница»: the SAME
       resizable-sheet page type, the ProfileBody inside (avatar/name/company/
       background/logout); the universal back of the sheet is its drag-down +

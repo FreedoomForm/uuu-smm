@@ -31,7 +31,7 @@ import { tUI } from '@/lib/i18n';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
 import { useSmmStore } from '@/stores/smm-store';
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Film, Image as ImgIcon, Loader2, MapPin, Paperclip, Plus, Trash2, Users, Tag as TagIcon, ListChecks, Pencil, Minus, Upload } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Image as ImgIcon, Loader2, MapPin, Paperclip, Plus, Trash2, Users, Tag as TagIcon, ListChecks, Pencil, Minus, Upload } from 'lucide-react';
 import LangButton from '@/components/lang-button';
 import { Collapse } from '@/components/motion';
 import { SMM_PLATFORMS, eventPlatformIcon, eventPlatformLabel, mapEmbedUrl, mediaSrc, fmtMoney, SmmToast } from './smm-bits';
@@ -580,11 +580,8 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
   const [tags, setTags] = useState<string[]>([]);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [tasks, setTasks] = useState<{ label: string; desc: string }[]>([]);
-  const [mediaUrl, setMediaUrl] = useState('');
-  const [mediaType, setMediaType] = useState<'video' | 'image'>('image');
   const [coverColor, setCoverColor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     api.getMyRoles().then((r: any) => setRoles(r.items || [])).catch(() => setRoles([]));
@@ -614,29 +611,9 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, myId]);
 
-  const addMedia = () => {
-    const u = mediaUrl.trim();
-    if (!u) return;
-    setMedia(prev => [...prev, { url: u, type: mediaType }]);
-    setMediaUrl('');
-  };
-
-  const uploadFile = async (file: File) => {
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/attachments/upload', { method: 'POST', body: fd });
-      const j = await res.json();
-      if (!res.ok || !j?.url) throw new Error(j?.error || 'Upload failed');
-      const isVideo = (file.type || '').startsWith('video');
-      setMedia(prev => [...prev, { url: j.url, type: isVideo ? 'video' : 'image', title: file.name }]);
-    } catch (e: any) {
-      smmToast(e?.message || 'Error');
-    } finally {
-      setUploading(false);
-    }
-  };
+  // the «Видео или коллекция фото» section is REMOVED from the editor — the
+  // loaded media/coverColor still ride on every save, so old posts keep
+  // their collections and the cover colour untouched.
 
   const save = async () => {
     const name = newRoleName.trim();
@@ -696,43 +673,9 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
         </div>
       </CollapsibleSection>
 
-      {/* ── МЕДИА (видео/фото-коллекция) + цвет обложки */}
-      <CollapsibleSection title={t('smmPostMedia')} icon={<Film className="w-4 h-4 shrink-0" />} defaultOpen={false} count={media.length}>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-2">
-            {media.map((m, i) => (
-              <div key={i} className="relative w-16 h-16 rounded-xl overflow-hidden border border-black/10 bg-[#FFF0D9] flex items-center justify-center group">
-                {m.type === 'image' ? <img src={mediaSrc(m.url)} alt="" className="w-full h-full object-cover" /> : <Film className="w-6 h-6 text-cta" />}
-                <button type="button" onClick={() => setMedia(prev => prev.filter((_, j) => j !== i))}
-                  className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-white/90 border border-black/20 flex items-center justify-center">
-                  <Trash2 className="w-3 h-3 text-destructive" />
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <Input value={mediaUrl} onChange={e => setMediaUrl(e.target.value)} placeholder="https://…" className="h-9 rounded-full border-black/20 bg-white flex-1" />
-            <button type="button" onClick={() => setMediaType(mediaType === 'image' ? 'video' : 'image')}
-              className="h-9 px-3 rounded-full border-2 border-black/20 text-xs font-bold flex items-center gap-1.5 shrink-0">
-              {mediaType === 'image' ? <ImgIcon className="w-3.5 h-3.5" /> : <Film className="w-3.5 h-3.5" />} {mediaType}
-            </button>
-            <Button size="sm" variant="outline" onClick={addMedia} disabled={!mediaUrl.trim()} className="h-9 rounded-full border-black shrink-0"><Plus className="size-3.5" /></Button>
-          </div>
-          <label className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
-            {uploading ? <Loader2 className="w-3.5 h-3.5 inline animate-spin" /> : null} {t('smmPostMediaAdd')} ⤴
-            <input type="file" accept="image/*,video/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(f); e.target.value = ''; }} />
-          </label>
-          <div className="flex flex-col gap-1.5 pt-1">
-            <Label className="text-sm font-bold">Cover</Label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {COVER_COLORS.map(c => (
-                <button key={c} type="button" onClick={() => setCoverColor(coverColor === c ? null : c)}
-                  className={`w-8 h-8 rounded-full border-2 ${coverColor === c ? 'border-black scale-110' : 'border-black/20'}`} style={{ backgroundColor: c }} />
-              ))}
-            </div>
-          </div>
-        </div>
-      </CollapsibleSection>
+      {/* ── «ВИДЕО ИЛИ КОЛЛЕКЦИЯ ФОТО» REMOVED — the media section is gone
+      from the creation and editing pages (the user's cut). The cover photo
+      lives in the ВВОД section; old posts keep their saved collections. */}
 
       {/* ── ТЕГИ */}
       <CollapsibleSection title={t('smmTagsSection')} icon={<TagIcon className="w-4 h-4 shrink-0" />} defaultOpen={false} count={tags.length}>

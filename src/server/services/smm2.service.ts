@@ -406,6 +406,22 @@ export async function getEvent(id: string) {
   return { event: { ...event, tests: await eventTests(event.testIds) } };
 }
 
+// ССЫЛКА ПОСТА («опубликовать только тем, у кого есть ссылка»): the post
+// copied-link opens by id the same way getEvent does — isPublic is NOT
+// checked here (the link IS the access), the публичная filter still hides
+// link-only posts from the общая библиотека lists.
+export async function getPost(id: string) {
+  const post = await db.smmPost.findUnique({
+    where: { id },
+    include: {
+      role: { select: { id: true, name: true, pricePerK: true, pricePerDay: true } },
+      specialist: publicUser,
+    },
+  });
+  if (!post) throw ApiError.notFound("Post not found");
+  return { post };
+}
+
 function eventPayload(userId: string, body: Record<string, unknown>, forCreate: boolean) {
   const data: Record<string, unknown> = {};
   const str = (k: string, max: number) =>

@@ -1,7 +1,11 @@
-// SMM POST [id] — edit / delete (owner only)
+// SMM POST [id] — read-by-link / edit / delete (owner-only writes)
 import { NextResponse } from "next/server";
 import { withApiAuth } from "@/server/http/handler";
-import { updatePost, deletePost } from "@/server/services/smm2.service";
+import { getPost, updatePost, deletePost } from "@/server/services/smm2.service";
+
+export const GET = withApiAuth(async ({ params }) => {
+  return NextResponse.json(await getPost(params.id));
+});
 
 export const PUT = withApiAuth(async ({ userId, params, req }) => {
   const body = await req.json();
