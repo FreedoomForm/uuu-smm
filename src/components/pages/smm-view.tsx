@@ -1510,6 +1510,23 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     if (it && it.id !== smmNow().activeCardId) useSmmStore.setState({ activeCardId: it.id });
   };
 
+  // The apply-role pick defaults itself while a FOREIGN мероприятие card is
+  // active — one effect covers every activation path (a grid card tap, a
+  // slide swipe commit, roles arriving late after the swipe): the «Подать
+  // заявку» bar button never sticks disabled (the old tap-only defaulting
+  // missed the swipe flow when myRoles were still loading).
+  const activeEventId = activeEvent?.id || null;
+  useEffect(() => {
+    if (!isSpecialist) return;
+    if (!activeEventId) return;
+    const ev = activeEvent;
+    if (!ev || ev.customerId === myId) return;
+    if (myRoles.length === 0) return;
+    if (!pickedApplyRole || !myRoles.some(r => r.id === pickedApplyRole)) {
+      useSmmStore.setState({ pickedApplyRole: myRoles[0].id });
+    }
+  }, [activeEventId, pickedApplyRole, myRoles, isSpecialist, myId]);
+
   // Wheel gate: events originating inside an inner scrollable (the slide's
   // white content card) keep their NATIVE scrolling — stopped here in the
   // capture phase so the Swiper mousewheel engine never sees them.
@@ -1711,14 +1728,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       if (it.kind === 'post') return it.specialistId === myId ? () => openEditWindow('post', it.id, it.role?.name || t('smmPost'), it) : undefined;
       return undefined;
     })(),
-    // «Подать заявку» — the FOREIGN мероприятие card's own button (every
-    // surface the card shows on): the role is picked by the chips ON the
-    // card, the button opens the заявка flow for THIS event.
-    onApply: (() => {
-      if (!isSpecialist || it.kind !== 'event' || it.customerId === myId) return undefined;
-      const ev = it;
-      return () => applyFromCard(ev);
-    })(),
     onDelete: () => {
       // «Удалить» opens the same confirm-first dialog the test cards open —
       // the delete itself happens only after the confirmation. (A СОС-тикет
@@ -1778,11 +1787,12 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   };
 
   // ── the first bottom bar (context action) ───────────────────────────────
-  // THE SPECIALIST'S BAR IS GONE: «Подать заявку» lives on the event card's
-  // own ladder now (under the role picker) — the bottom panel stays clean
-  // in BOTH libraries. The customer's «Пригласить на мероприятие» stands
-  // on the ПУБЛИЧНАЯ library and the floating windows only — the ЛИЧНАЯ
-  // (own events, nobody to invite) drops it too.
+  // «Подать заявку» stands in the bottom panel of the ПУБЛИЧНАЯ library for
+  // the specialist — the active foreign мероприятие card defines the action
+  // (the role is picked by the chips ON the card, the button submits).
+  // The customer's «Пригласить на мероприятие» stands on the ПУБЛИЧНАЯ
+  // library and the floating windows only — the ЛИЧНАЯ (own events, nobody
+  // to invite) drops it.
   const barAction = (() => {
     // the MAP window keeps the frame but drops the context bar — the map has
     // its own floating «добавить спот» control; the chat page / checklist /
@@ -1821,9 +1831,19 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     // chats / requests windows keep the bar standing too.
     const mainVisible = topWindow === 'none' || topWindow === 'files' || topWindow === 'card-chat';
     if (!mainVisible && topWindow !== 'bookmarks' && topWindow !== 'chats' && topWindow !== 'requests') return null;
-    // THE SPECIALIST: no bottom action bar at all — «Подать заявку» sits on
-    // the event card itself (the ladder button under the role picker).
-    if (isSpecialist) return null;
+    // THE SPECIALIST: the contextual «Подать заявку» — the bottom-panel
+    // button over a foreign мероприятие card (публичная библиотека /
+    // bookmarks): the role chips on the card pick the role, the bar
+    // submits. Disabled only in the transient state «roles exist but none
+    // picked» (the picker defaults the first role instantly, so it never
+    // sticks); role-less specialists get a WORKING button that opens the
+    // post editor (the role is born there).
+    if (isSpecialist) {
+      if (mainVisible && activeItem?.kind === 'event' && activeEvent && activeEvent.customerId !== myId) {
+        return { label: t('smmApplyBtn'), fn: applyFromCard, disabled: myRoles.length > 0 && !pickedApplyRole };
+      }
+      return null;
+    }
     // CUSTOMER MODE — the invite button stands on the ПУБЛИЧНАЯ library and
     // the floating windows; the ЛИЧНАЯ библиотека (own events only — there
     // is nobody to invite) drops it.
@@ -2504,7 +2524,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       {barAction && (
         <div className="desktop-dock desktop-dock-raised shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
           <div className="max-w-2xl mx-auto px-4 pt-3 pb-3">
-            <Button onClick={barAction.fn} disabled={'disabled' in barAction && barAction.disabled} className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-cta hover:bg-cta/90 text-white">
+            {/* no args: applyFromCard(ev?) must NOT receive the click event —
+            the bar always acts on the ACTIVE мероприятие */}
+            <Button onClick={() => barAction.fn()} disabled={'disabled' in barAction && barAction.disabled} className="w-full h-9 lg:h-11 lg:text-base rounded-full bg-cta hover:bg-cta/90 text-white">
               {barAction.label}
             </Button>
           </div>

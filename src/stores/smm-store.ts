@@ -142,6 +142,12 @@ export const useSmmStore = makeStore<SmmData>(INITIAL);
 
 export const smmNow = () => useSmmStore.getState();
 
+// QA hook: the browser console / agent-browser eval can read the dashboard
+// state without React internals (window.__smm()). Harmless in production.
+if (typeof window !== 'undefined') {
+  (window as any).__smm = () => useSmmStore.getState();
+}
+
 export function bumpRefresh() {
   useSmmStore.setState((s: SmmData) => ({ refreshNonce: s.refreshNonce + 1 }));
 }

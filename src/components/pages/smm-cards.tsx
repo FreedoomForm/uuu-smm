@@ -43,11 +43,6 @@ export interface CardCtx {
   // личная библиотека (the parent decides); when absent the button never
   // renders, so the публичная библиотека stays read-only.
   onEdit?: () => void;
-  // «Подать заявку» — the FOREIGN мероприятие card's own button (the
-  // specialist side): replaced the old bottom-bar action, so the role chips
-  // + the button live together ON the card. Absent for own events and for
-  // the customer — the button never renders there.
-  onApply?: () => void;
   onOpen: () => void;
   // «Обсудить с ИИ» — the same AI discussion the test cards open
   onAi: () => void;
@@ -294,14 +289,6 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
   );
   const ladder = (
     <div className="card-ladder shrink-0 pt-1.5 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
-      {/* «Подать заявку» — the FIRST row of a foreign event's ladder (the
-      specialist side): the role chips sit right above it, the old bottom-bar
-      button is gone. */}
-      {!own && ctx.onApply && (
-        <Button size="sm" variant="outline" onClick={ctx.onApply} title={t('smmApplyBtn')} className={`${LADDER_BTN} border-cta/70 text-cta hover:bg-cta/10 hover:text-cta`}>
-          <Megaphone className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmApplyBtn')}</span>
-        </Button>
-      )}
       <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
         <Bot className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gAi')}</span>
       </Button>
@@ -343,8 +330,6 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
     ONE white scrollable content card → the full-width rounded-2xl ladder. */
     const slideLadder = (
       <>
-        {/* «Подать заявку» — the first row, the same the grid ladder keeps */}
-        {!own && ctx.onApply && <SlideBtn onClick={ctx.onApply} icon={<Megaphone className="w-4 h-4 shrink-0 text-cta" />} label={t('smmApplyBtn')} />}
         <SlideBtn onClick={ctx.onAi} icon={<Bot className="w-4 h-4 shrink-0" />} label={t('aiDiscuss')} tone={ctx.aiActive ? 'ai' : undefined} />
         <SlideBtn onClick={ctx.onChat} icon={<MessageCircle className="w-4 h-4 shrink-0" />} label={t('gChat')} />
         <SlideBtn onClick={ctx.onFiles} icon={<Paperclip className="w-4 h-4 shrink-0" />} label={t('attachedFiles', { n: (event.tests || []).length + ((event.attachments || []).length) })} />
