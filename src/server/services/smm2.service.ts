@@ -929,6 +929,18 @@ export async function createInvitation(
   const event = await db.smmEvent.findUnique({ where: { id: body.eventId } });
   if (!event) throw ApiError.notFound("Event not found");
   if (event.customerId !== userId) throw ApiError.forbidden("Not your event");
+  // ── THE EVENT FULLNESS GUARD («уже полная»): when the accepted deals for
+  // the event (invitations + applications, accepted|completed) reach
+  // peopleRequired, no NEW invitations can be sent — the invite picker shows
+  // the event as already full; this 409 is the last-line defence.
+  const need = Number((event as any).peopleRequired) || 0;
+  if (need > 0) {
+    const [accApps, accInvs] = await Promise.all([
+      db.smmApplication.count({ where: { eventId: event.id, status: { in: ["accepted", "completed"] } } }),
+      db.smmInvitation.count({ where: { eventId: event.id, status: { in: ["accepted", "completed"] } } }),
+    ]);
+    if (accApps + accInvs >= need) throw ApiError.conflict("Мероприятие уже укомплектовано — свободных мест нет");
+  }
   const role = await db.smmRole.findUnique({ where: { id: body.roleId } });
   if (!role || role.ownerId !== body.specialistId) throw ApiError.badRequest("Choose the specialist's role");
   const dup = await db.smmInvitation.findFirst({

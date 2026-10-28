@@ -443,7 +443,11 @@ const en: Dict = {
   smmInviteConfirm: 'Confirm request submission',
   smmApplySent: 'Application sent',
   smmInviteSent: 'Invitation sent',
-  smmInviteNoTarget: 'Open a specialist\u2019s card first — the invite is sent from their card, profile or chat',
+  smmInviteNoTarget: 'Open the specialist\u2019s card and tap «Invite to event» there',
+  // THE EVENT FULLNESS («уже полная»): the accepted deals reached
+  // peopleRequired — the picker shows the event as full and blocks the send
+  smmEventFull: 'Already full',
+  smmEventFullHint: 'This event is already full — no free slots. Pick another one.',
   // ЗАЯВКА БЕЗ ТЕСТА: the specialist attaches a LINK to the ad post/video
   smmApplyLink: 'Link to the ad post/video',
   smmApplyLinkPh: 'https://instagram.com/reel/…',
@@ -1165,7 +1169,11 @@ const ru: Dict = {
   smmInviteConfirm: 'Подтвердить отправку запроса',
   smmApplySent: 'Заявка отправлена',
   smmInviteSent: 'Приглашение отправлено',
-  smmInviteNoTarget: 'Сначала откройте карточку специалиста — приглашение отправляется из его карточки, профиля или чата',
+  smmInviteNoTarget: 'Откройте карточку специалиста и нажмите там «Пригласить на мероприятие»',
+  // МЕРОПРИЯТИЕ «УЖЕ ПОЛНАЯ»: принятые сделки достигли peopleRequired — в
+  // окне выбора мероприятие помечено как полное и отправка заблокирована
+  smmEventFull: 'Уже полная',
+  smmEventFullHint: 'Это мероприятие уже укомплектовано — свободных мест нет. Выберите другое.',
   // ЗАЯВКА БЕЗ ТЕСТА: ссылка на рекламу вместо квалификационных тестов
   smmApplyLink: 'Ссылка на рекламный пост/видео',
   smmApplyLinkPh: 'https://instagram.com/reel/…',
@@ -1885,7 +1893,10 @@ const uz: Dict = {
   smmInviteConfirm: 'Soʻrov yuborishni tasdiqlash',
   smmApplySent: 'Ariza yuborildi',
   smmInviteSent: 'Taklif yuborildi',
-  smmInviteNoTarget: 'Avval mutaxassis kartochkasini ochingiz — taklif uning kartochkasi, profili yoki chatidan yuboriladi',
+  smmInviteNoTarget: 'Mutaxassis kartochkasini oching va unda «Tadbirga taklif qilish»ni bosing',
+  // TADBIR TO\u2019LA: qabul qilingan bitimlar peopleRequired ga yetdi
+  smmEventFull: 'Allaqachon to\u2019la',
+  smmEventFullHint: 'Bu tadbir allaqachon to\u2019lgan — bo\u2019sh joylar yo\u2019q. Boshqasini tanlang.',
   // TESTSIZ ARIZA: reklama havolasi (test oʻrniga)
   smmApplyLink: 'Reklama posti/videosiga havola',
   smmApplyLinkPh: 'https://instagram.com/reel/…',

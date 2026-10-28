@@ -29,6 +29,7 @@ import { useNavStore } from '@/stores/nav-store';
 import { useSmmStore } from '@/stores/smm-store';
 import { Check, Link2, Loader2, MapPin, Users } from 'lucide-react';
 import { EditorShell } from './smm-editors';
+import { isEventFull } from './smm-pickers';
 import type { SmmEventT, SmmPostT } from '@/lib/app-types';
 
 function useT() {
@@ -256,7 +257,8 @@ export function SmmInviteView() {
       const items: SmmEventT[] = r.items || [];
       setMyEvents(items);
       // heal a stale pick (deleted event / old session) — the first own event
-      setPickedEventId(cur => (cur && items.some(e => e.id === cur) ? cur : (items[0]?.id || null)));
+      // WITH FREE SLOTS (a full event must not be the silent default)
+      setPickedEventId(cur => (cur && items.some(e => e.id === cur) ? cur : (items.find(e => !isEventFull(e))?.id || null)));
     }).catch(() => setMyEvents([]));
   }, []);
   const pickedEvent = useMemo(
@@ -288,6 +290,7 @@ export function SmmInviteView() {
     if (roleChips && !pickedRoleId) return;
     const evId = pickedEvent?.id || inviteCtx.eventId;
     if (!evId) return;
+    if (pickedEvent && isEventFull(pickedEvent)) return;
     setSending(true);
     try {
       await api.createInvitation({
@@ -308,7 +311,7 @@ export function SmmInviteView() {
 
   return (
     <EditorShell title={t('smmInviteTitle')} onBack={back} lang={lang} cycleLang={cycleLang}
-      saveLabel={t('smmInviteConfirm')} onSave={confirm} saving={sending} saveDisabled={sending || (roleChips ? !pickedRoleId : !inviteCtx.roleId)}>
+      saveLabel={t('smmInviteConfirm')} onSave={confirm} saving={sending} saveDisabled={sending || (roleChips ? !pickedRoleId : !inviteCtx.roleId) || (!!pickedEvent && isEventFull(pickedEvent))}>
       {/* ── ОКНО ВЫБОРА МЕРОПРИЯТИЯ: the customer's own events — the picked
       event is the one the chat's ПРИГЛАШЕНИЕ message carries */}
       <Card className="rounded-4xl border border-black bg-white">
@@ -323,26 +326,33 @@ export function SmmInviteView() {
           <div className="flex flex-col gap-1.5">
             {myEvents.map(ev => {
               const active = ev.id === pickedEvent?.id;
+              const full = isEventFull(ev);
+              const need = Number((ev as any).peopleRequired) || 0;
+              const acc = Number((ev as any).acceptedCount) || 0;
               return (
-                <button key={ev.id} type="button" onClick={() => setPickedEventId(ev.id)}
-                  className={`w-full text-left rounded-2xl border-2 p-3 transition-colors ${active ? 'border-cta bg-[#FFF7ED]' : 'border-black/15 bg-white hover:border-black/40'}`}>
+                <button key={ev.id} type="button" disabled={full} onClick={() => { if (!full) setPickedEventId(ev.id); }}
+                  className={`w-full text-left rounded-2xl border-2 p-3 transition-colors ${full ? 'border-black/10 bg-muted/40 opacity-60 cursor-not-allowed' : active ? 'border-cta bg-[#FFF7ED]' : 'border-black/15 bg-white hover:border-black/40'}`}>
                   <div className="flex items-center gap-2">
                     <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${active ? 'border-cta bg-cta' : 'border-black/25 bg-white'}`}>
                       {active && <Check className="w-3 h-3 text-white" />}
                     </span>
                     <span className="text-sm font-bold truncate">{ev.title}</span>
+                    {full && <span className="ml-auto shrink-0 rounded-full bg-black text-white text-[10px] font-bold px-2 py-0.5">{t('smmEventFull')}</span>}
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-1 text-[11px] text-muted-foreground">
                     {ev.format === 'offline' && ev.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {ev.location}</span>}
                     {ev.timeAt && <span>· {ev.timeAt}</span>}
-                    {Number((ev as any).peopleRequired) > 0 && (
-                      <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {t('smmPeopleRequired')}: {(ev as any).peopleRequired}</span>
+                    {need > 0 && (
+                      <span className={`flex items-center gap-1 ${full ? 'text-red-600 font-bold' : ''}`}><Users className="w-3 h-3" /> {acc}/{need}</span>
                     )}
                   </div>
                 </button>
               );
             })}
           </div>
+          {pickedEvent && isEventFull(pickedEvent) && (
+            <p className="text-[11px] text-red-600 font-semibold text-center pt-0.5">{t('smmEventFullHint')}</p>
+          )}
         </CardContent>
       </Card>
       {/* THE ROLE CHIPS («Выбрать другую роль»): switch the role the invite

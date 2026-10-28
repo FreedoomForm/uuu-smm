@@ -36,6 +36,16 @@ export interface PickerSp {
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
+// ── THE EVENT FULLNESS («уже полная»): the accepted deals for the event
+// (invitations + applications, accepted|completed) reached peopleRequired —
+// the event takes no NEW invitations: the picker marks it as full, blocks
+// the pick and the send (the backend guard mirrors this in createInvitation).
+export function isEventFull(ev: any): boolean {
+  const need = Number(ev?.peopleRequired) || 0;
+  if (need <= 0) return false;
+  return (Number(ev?.acceptedCount) || 0) >= need;
+}
+
 // ── ПРИГЛАШЕНИЕ (the customer picks the event → the invite goes to the chat)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -67,7 +77,9 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
       if (!alive) return;
       const items: SmmEventT[] = r.items || [];
       setMyEvents(items);
-      setPickedEventId(items[0]?.id || null);
+      // default pick = the first event with FREE SLOTS — a full event must
+      // never become the silent default (the user's «уже полная» rule)
+      setPickedEventId(items.find(e => !isEventFull(e))?.id || items[0]?.id || null);
     }).catch(() => { if (alive) setMyEvents([]); });
     if (sp?.id) {
       api.getSmmProfile(sp.id).then((p: any) => {
@@ -94,7 +106,7 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
   const estimate = pickedRole ? (effFormat === 'online' ? pickedRole.pricePerK : pickedRole.pricePerDay) : null;
 
   const confirm = async () => {
-    if (!spCtx || !pickedEvent || !pickedRole) return;
+    if (!spCtx || !pickedEvent || !pickedRole || isEventFull(pickedEvent)) return;
     setSending(true);
     try {
       await api.createInvitation({ specialistId: spCtx.id, eventId: pickedEvent.id, roleId: pickedRole.id, estimate });
@@ -108,7 +120,7 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
     }
   };
 
-  const ready = !!pickedEvent && !!spCtx && !!pickedRole;
+  const ready = !!pickedEvent && !!spCtx && !!pickedRole && !isEventFull(pickedEvent);
 
   return (
     <ResizableSheetFrame
@@ -147,26 +159,33 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
                   <div className="flex flex-col gap-1.5">
                     {myEvents.map(ev => {
                       const active = ev.id === pickedEvent?.id;
+                      const full = isEventFull(ev);
+                      const need = Number((ev as any).peopleRequired) || 0;
+                      const acc = Number((ev as any).acceptedCount) || 0;
                       return (
-                        <button key={ev.id} type="button" onClick={() => setPickedEventId(ev.id)}
-                          className={`w-full text-left rounded-2xl border-2 p-3 transition-colors ${active ? 'border-cta bg-[#FFF7ED]' : 'border-black/15 bg-white hover:border-black/40'}`}>
+                        <button key={ev.id} type="button" disabled={full} onClick={() => { if (!full) setPickedEventId(ev.id); }}
+                          className={`w-full text-left rounded-2xl border-2 p-3 transition-colors ${full ? 'border-black/10 bg-muted/40 opacity-60 cursor-not-allowed' : active ? 'border-cta bg-[#FFF7ED]' : 'border-black/15 bg-white hover:border-black/40'}`}>
                           <div className="flex items-center gap-2">
                             <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${active ? 'border-cta bg-cta' : 'border-black/25 bg-white'}`}>
                               {active && <Check className="w-3 h-3 text-white" />}
                             </span>
                             <span className="text-sm font-bold truncate">{ev.title}</span>
+                            {full && <span className="ml-auto shrink-0 rounded-full bg-black text-white text-[10px] font-bold px-2 py-0.5">{t('smmEventFull')}</span>}
                           </div>
                           <div className="flex flex-wrap gap-1.5 mt-1 text-[11px] text-muted-foreground">
                             {ev.format === 'offline' && ev.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {ev.location}</span>}
                             {ev.timeAt && <span>· {ev.timeAt}</span>}
-                            {Number((ev as any).peopleRequired) > 0 && (
-                              <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {t('smmPeopleRequired')}: {(ev as any).peopleRequired}</span>
+                            {need > 0 && (
+                              <span className={`flex items-center gap-1 ${full ? 'text-red-600 font-bold' : ''}`}><Users className="w-3 h-3" /> {acc}/{need}</span>
                             )}
                           </div>
                         </button>
                       );
                     })}
                   </div>
+                  {pickedEvent && isEventFull(pickedEvent) && (
+                    <p className="text-[11px] text-red-600 font-semibold text-center pt-0.5">{t('smmEventFullHint')}</p>
+                  )}
                 </div>
 
                 {/* ── СПЕЦИАЛИСТ: the context target (NO picker any more —
