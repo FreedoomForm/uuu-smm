@@ -41,7 +41,7 @@ export default function LandingView({
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <span className="font-extrabold tracking-tight flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.svg" alt="ADposter" className="w-7 h-7 rounded-lg object-cover" />
+            <img src="/logo-mark.svg" alt="ADposter" className="w-7 h-7 rounded-lg object-cover" />
             <span><span className="text-cta">AD</span>poster</span>
           </span>
           <div className="flex items-center gap-2">
