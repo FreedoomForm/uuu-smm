@@ -102,6 +102,18 @@ interface ListSnapshot {
 }
 let listSnapshot: { key: string; at: number; data: ListSnapshot } | null = null;
 
+// «СОКРАТИ НАЗВАНИЕ ЗАПРОСА» — the СОС peer line is "Имя ⇄ Имя" (both FULL
+// names) and the chat header rode it off-screen: the top buttons disappeared.
+// Every TITLE surface now shows FIRST names only, with a hard character cap
+// (the DB keeps the full line — this is a display trim, not data loss).
+const shortPeerNames = (s?: string | null) => {
+  if (!s) return '';
+  const halves = s.split('⇄');
+  const short = halves.map(h => (h.trim().split(/\s+/)[0] || '').trim()).filter(Boolean).join(' ⇄ ');
+  const out = short || s.trim();
+  return out.length > 32 ? `${out.slice(0, 31).trimEnd()}…` : out;
+};
+
 // ── THE СОС-ЗАПРОС CARD (the admin's ticket library) — the same card
 // anatomy the marketplace keeps, but the body is a support request: who
 // pressed СОС (peer names → their profile), the deal title, the reason and
@@ -145,7 +157,7 @@ function SmmSosTicketCard({ tk, variant, t, onOpen, onOpenProfile, onChat, onClo
             {isDealReq ? <Scale className="w-4 h-4" /> : <Siren className="w-4 h-4" />}
           </span>
           <button onClick={e => { e.stopPropagation(); onOpenProfile(); }} className="min-w-0 text-left" title={t('smmViewProfile')}>
-            <span className="block text-sm font-bold truncate hover:underline">{tk.peerNames || tk.createdByName || t('smmTicketTitle')}</span>
+            <span className="block text-sm font-bold truncate hover:underline">{shortPeerNames(tk.peerNames) || shortPeerNames(tk.createdByName) || t('smmTicketTitle')}</span>
           </button>
         </div>
         <Badge variant="secondary" className={`rounded-full text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</Badge>
@@ -1425,7 +1437,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
 
   const adminOpenTicketChat = (tk: { chatId: string; peerNames: string; eventTitle: string }) => {
     useSmmStore.setState({
-      chatPage: { chatId: tk.chatId, peerId: '', peerName: tk.peerNames || 'СОС', title: tk.eventTitle },
+      chatPage: { chatId: tk.chatId, peerId: '', peerName: shortPeerNames(tk.peerNames) || 'СОС', title: tk.eventTitle },
       topWindow: 'chat', openChatId: null, filesTarget: null, cardChat: null,
     });
   };
@@ -1951,9 +1963,13 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       // page (top panel + bottom docks) — the messages fill the middle, the
       // input sits on its own bar above the library dock. Realtime = the
       // long-poll loop (~1s delivery). Tapping the header peer → profile.
-      // THE PERMANENT PAIR above the input: the customer's «Пригласить на
-      // мероприятие» + the specialist's «Подать запрос» — always standing,
-      // each opens the picker window with the chat peer as the context.
+      // THE PAIR above the input: the customer's «Пригласить на мероприятие»
+      // + the specialist's «Подать запрос» — each opens the picker window with
+      // the chat peer as the context. ONCE-ONLY: the button disappears as soon
+      // as THIS chat already carries an invitation / an application (the deal
+      // cards in the thread take over) — no repeat invites / заявки in one chat.
+      const pageInvited = !!chatMeta[chatPage.chatId]?.invitations?.length;
+      const pageApplied = !!chatMeta[chatPage.chatId]?.applications?.length;
       return (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
@@ -1966,14 +1982,14 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           {renderDealBar(chatPage.chatId)}
           <div className="desktop-dock desktop-dock-raised shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
             <div className="max-w-2xl mx-auto px-3 py-2 flex flex-col gap-2">
-              {!isSpecialist && chatPage.peerId && (
+              {!isSpecialist && chatPage.peerId && !pageInvited && (
                 <Button size="sm" variant="outline" disabled={busy}
                   onClick={() => openInviteWindowForPeer(chatPage.peerId, chatPage.peerName)}
                   className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
                   <Users className="w-3.5 h-3.5" /> {t('smmChatInviteCta')}
                 </Button>
               )}
-              {isSpecialist && chatPage.peerId && (
+              {isSpecialist && chatPage.peerId && !pageApplied && (
                 <Button size="sm" variant="outline" disabled={busy}
                   onClick={() => openApplyWindow(chatPage.peerId)}
                   className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
@@ -2241,6 +2257,10 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
         if (openChatId) {
           const chat = chats.find(c => c.id === openChatId);
           const dlgPeerId = chat?.peer?.id || '';
+          // the ONCE-ONLY rule (see the chat page): an invitation / an
+          // application already in THIS chat removes the matching CTA row
+          const dlgInvited = !!chatMeta[openChatId]?.invitations?.length;
+          const dlgApplied = !!chatMeta[openChatId]?.applications?.length;
           return (
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
@@ -2253,16 +2273,17 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
               {renderDealBar(openChatId)}
               <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-3 py-2" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
                 <div className="max-w-2xl mx-auto flex flex-col gap-2">
-                  {/* THE PERMANENT PAIR in the dialog — the same two rows the
-                  chat page keeps: invite (customer) / заявка (specialist) */}
-                  {!isSpecialist && dlgPeerId && (
+                  {/* THE PAIR in the dialog — the same two rows the chat page
+                  keeps: invite (customer) / заявка (specialist) — and the same
+                  ONCE-ONLY rule: already invited / already applied → gone. */}
+                  {!isSpecialist && dlgPeerId && !dlgInvited && (
                     <Button size="sm" variant="outline" disabled={busy}
                       onClick={() => openInviteWindowForPeer(dlgPeerId, chat?.title || '')}
                       className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
                       <Users className="w-3.5 h-3.5" /> {t('smmChatInviteCta')}
                     </Button>
                   )}
-                  {isSpecialist && dlgPeerId && (
+                  {isSpecialist && dlgPeerId && !dlgApplied && (
                     <Button size="sm" variant="outline" disabled={busy}
                       onClick={() => openApplyWindow(dlgPeerId)}
                       className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
@@ -2490,7 +2511,10 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
               </Button>
             </div>
           )}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
+          {/* NO shrink-0 here: a long title (СОС peer names / event title) must
+          SQUEEZE this side (the h1/button truncates) — with shrink-0 the whole
+          strip rode off-screen and took the top buttons with it. */}
+          <div className="flex items-center gap-1 sm:gap-2 min-w-0">
             {(topWindow !== 'none' || openChatId) && (
               <Button variant="outline" size="icon"
                 onClick={() => {
