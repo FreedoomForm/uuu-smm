@@ -5,10 +5,10 @@
 // navigation — a floating window over the current view):
 //
 //   SmmInviteWindow («Пригласить на мероприятие», the customer): the EVENT
-//     picker (their own заказы) + the SPECIALIST picker (the invite target —
-//     pre-picked from context when the customer came from a specialist's
-//     card/profile/chat) + the role chips + the estimate → the
-//     ПРИГЛАШЕНИЕ#id message lands in the direct chat.
+//     picker (their own заказы) + the specialist target from the CONTEXT
+//     (specialist card / profile / chat — NO specialist picker any more, the
+//     user's cut) + the role chips → the ПРИГЛАШЕНИЕ#id message lands in the
+//     direct chat. (No estimate block, no commission note — the user's cut.)
 //
 //   SmmApplyWindow («Подать запрос», the specialist): the ORDER picker (the
 //     active foreign заказ pre-picked; a chat context lists THE PEER's
@@ -25,9 +25,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ResizableSheetFrame } from '@/components/resize-sheet';
 import { api } from '@/lib/api';
 import { adUrlOk, normalizeAdUrl } from '@/lib/ad-url';
-import { Check, Link2, Loader2, MapPin, Star, Users, X } from 'lucide-react';
-import { fmtMoney } from './smm-bits';
-import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
+import { Check, Link2, Loader2, MapPin, Users, X } from 'lucide-react';
+import type { SmmEventT, SmmPostT } from '@/lib/app-types';
 
 export interface PickerSp {
   id: string;
@@ -45,15 +44,13 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
   onClose: () => void;
   t: TFn;
   // the invite target from the context (specialist card / profile / chat
-  // peer); null → the window shows the specialist picker
+  // peer); null → the window shows the no-target hint
   sp: PickerSp | null;
   onSent: () => void;
 }) {
   const [myEvents, setMyEvents] = useState<SmmEventT[]>([]);
   const [pickedEventId, setPickedEventId] = useState<string | null>(null);
   const [spCtx, setSpCtx] = useState<PickerSp | null>(sp);
-  const [pickedSpId, setPickedSpId] = useState<string | null>(sp?.id || null);
-  const [spList, setSpList] = useState<SmmSpecialistT[]>([]);
   const [pickedRoleId, setPickedRoleId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -65,7 +62,6 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
     let alive = true;
     setLoading(true);
     setSpCtx(sp);
-    setPickedSpId(sp?.id || null);
     setPickedRoleId(null);
     api.getEvents('mine').then((r: any) => {
       if (!alive) return;
@@ -78,15 +74,12 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
         if (!alive) return;
         const roles = (p?.user?.roles || []).map((r: any) => ({ id: r.id, name: r.name, pricePerK: r.pricePerK ?? null, pricePerDay: r.pricePerDay ?? null }));
         setSpCtx({ id: sp.id, name: p?.user?.name || sp.name, roles });
-        setPickedSpId(sp.id);
         setPickedRoleId(roles[0]?.id || null);
       }).catch(() => { if (alive) setSpCtx(sp); }).finally(() => { if (alive) setLoading(false); });
     } else {
-      // no target in sight — the specialist picker (the публичная's cards)
-      api.getSpecialists().then((r: any) => {
-        if (!alive) return;
-        setSpList(r.items || []);
-      }).catch(() => { if (alive) setSpList([]); }).finally(() => { if (alive) setLoading(false); });
+      // NO target in sight — no specialist picker any more (the user's cut):
+      // the invite is sent FROM the specialist's card / profile / chat.
+      setLoading(false);
     }
     return () => { alive = false; };
   }, [open, sp]);
@@ -94,14 +87,11 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
   const pickedEvent = useMemo(() => myEvents.find(e => e.id === pickedEventId) || null, [myEvents, pickedEventId]);
   const roles = spCtx?.roles || [];
   const pickedRole = roles.find(r => r.id === pickedRoleId) || null;
+  // the estimate rides on the invitation record (the role's price for the
+  // event's format) — the UI block is GONE (the user's cut), only the payload
+  // keeps it
   const effFormat: 'online' | 'offline' = pickedEvent?.format === 'offline' ? 'offline' : 'online';
   const estimate = pickedRole ? (effFormat === 'online' ? pickedRole.pricePerK : pickedRole.pricePerDay) : null;
-
-  const pickSp = (s: SmmSpecialistT) => {
-    setSpCtx({ id: s.id, name: s.name, roles: (s.roles || []).map(r => ({ id: r.id, name: r.name, pricePerK: r.pricePerK ?? null, pricePerDay: r.pricePerDay ?? null })) });
-    setPickedSpId(s.id);
-    setPickedRoleId(s.roles?.[0]?.id || null);
-  };
 
   const confirm = async () => {
     if (!spCtx || !pickedEvent || !pickedRole) return;
@@ -179,34 +169,12 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
                   </div>
                 </div>
 
-                {/* ── СПЕЦИАЛИСТ: the context target, or the picker ── */}
-                {!spCtx && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold">{t('smmPickPickSp')}</Label>
-                    {spList.length === 0 && <p className="text-xs text-muted-foreground py-2">{t('smmPickSpEmpty')}</p>}
-                    <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
-                      {spList.map(s => {
-                        const active = s.id === pickedSpId;
-                        return (
-                          <button key={s.id} type="button" onClick={() => pickSp(s)}
-                            className={`w-full text-left rounded-2xl border-2 p-3 transition-colors ${active ? 'border-cta bg-[#FFF7ED]' : 'border-black/15 bg-white hover:border-black/40'}`}>
-                            <div className="flex items-center gap-2">
-                              <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${active ? 'border-cta bg-cta' : 'border-black/25 bg-white'}`}>
-                                {active && <Check className="w-3 h-3 text-white" />}
-                              </span>
-                              <span className="text-sm font-bold truncate">{s.name}</span>
-                              <span className="ml-auto shrink-0 flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <Star className="w-3 h-3 text-amber-500 fill-amber-500" /> {s.rating > 0 ? s.rating.toFixed(1) : '—'}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{(s.roles || []).map(r => r.name).join(' · ') || '—'}</p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {spCtx && (
+                {/* ── СПЕЦИАЛИСТ: the context target (NO picker any more —
+                the user's cut: the invite is sent from the specialist's
+                card/profile/chat; without a target — a hint) ── */}
+                {!spCtx ? (
+                  <p className="text-xs text-muted-foreground text-center py-6 px-4">{t('smmInviteNoTarget')}</p>
+                ) : (
                   <div className="space-y-1.5">
                     <p className="text-[11px] font-bold text-muted-foreground uppercase">{t('smmPickSp')}</p>
                     <div className="rounded-2xl border-2 border-cta bg-[#FFF7ED] p-3">
@@ -223,14 +191,6 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
                     </div>
                   </div>
                 )}
-
-                {/* the estimate — the picked role's price for the event's format */}
-                <div className="rounded-4xl border-2 border-cta bg-white p-4 text-center">
-                  <p className="text-sm font-bold">{t('smmEstimate')}</p>
-                  <p className="text-3xl font-extrabold text-cta mt-1">{estimate != null ? fmtMoney(estimate) : '—'}</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">{effFormat === 'online' ? t('smmEstimateOnline') : t('smmEstimateOffline')}</p>
-                </div>
-                <p className="text-[11px] text-muted-foreground text-center px-2">{t('commissionNote')}</p>
               </>
             )}
           </div>

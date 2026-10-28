@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Camera, CheckCircle2, Loader2, LogOut, Trash2, Building2, Crown } from 'lucide-react';
+import React from 'react';
+import { ArrowLeft, Camera, CheckCircle2, Loader2, LogOut, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,7 +17,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { TEST_BG_PRESETS } from '@/lib/test-bg';
-import { api } from '@/lib/api';
 import { useProfileStore } from '@/stores/profile-store';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
@@ -145,8 +144,8 @@ export function ProfileBody({
           </CardContent>
         </Card>
 
-        {/* ── COMPANY PROFILE (customer side of the tourism marketplace) ── */}
-        <CompanyProfileCard t={t} smmRole={(effectiveUser as any)?.smmRole || ''} />
+        {/* The «Профиль компании (для каталога)» section is GONE (the user's
+        cut) — the profile keeps: photo, name, test background, account. */}
 
         {/* Test-taking background */}
         <Card className="rounded-4xl border border-black bg-white">
@@ -262,110 +261,5 @@ export default function ProfileView(props: ProfileViewProps) {
         <ProfileBody {...props} />
       </div>
     </div>
-  );
-}
-
-// ── COMPANY PROFILE CARD (the tourism business card for the catalog) ────────
-// The customer fills the company name/type/city — the card then shows in the
-// КАТАЛОГ КОМПАНИЙ (and the specialist understands WHO places the orders).
-// The premium toggle flips User.smmPremium (monetization MVP: the flag only —
-// billing comes later; premium ranks first in the catalog).
-function CompanyProfileCard({ t, smmRole }: {
-  t: (key: string, vars?: Record<string, string | number>) => string;
-  smmRole: string;
-}) {
-  const [companyName, setCompanyName] = useState('');
-  const [companyType, setCompanyType] = useState('');
-  const [companyCity, setCompanyCity] = useState('');
-  const [premium, setPremium] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [savedFlash, setSavedFlash] = useState(false);
-
-  useEffect(() => {
-    api.getProfile().then((p: any) => {
-      setCompanyName(p.smmCompanyName || '');
-      setCompanyType(p.smmCompanyType || '');
-      setCompanyCity(p.smmCompanyCity || '');
-      setPremium(!!p.smmPremium);
-    }).catch(() => {}).finally(() => setLoaded(true));
-  }, []);
-
-  const save = async (overrides?: { premium?: boolean }) => {
-    setSaving(true);
-    try {
-      await api.updateProfile({
-        smmCompanyName: companyName,
-        smmCompanyType: companyType,
-        smmCompanyCity: companyCity,
-        smmPremium: overrides?.premium ?? premium,
-      });
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 1600);
-    } catch { /* noop */ } finally {
-      setSaving(false);
-    }
-  };
-
-  const types = ['hotel', 'guesthouse', 'guide', 'tour-agency', 'other'];
-  const typeKey = (ty: string) => ty === 'hotel' ? 'companyTypeHotel' : ty === 'guesthouse' ? 'companyTypeGuesthouse' : ty === 'guide' ? 'companyTypeGuide' : ty === 'tour-agency' ? 'companyTypeTourAgency' : 'companyTypeOther';
-
-  return (
-    <Card className="rounded-4xl border border-black bg-white">
-      <CardContent className="p-5 sm:p-6 space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-cta/10 text-cta flex items-center justify-center shrink-0"><Building2 className="w-4 h-4" /></span>
-          <div>
-            <h3 className="text-sm font-semibold">{t('profileCompanyTitle')}</h3>
-            {smmRole === 'specialist' && (
-              <p className="text-[11px] text-muted-foreground">{t('smmSpecialist')}: {t('companyTypeOther')}</p>
-            )}
-          </div>
-        </div>
-        {loaded && (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs font-bold">{t('profileCompanyName')}</Label>
-                <Input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder={t('profileCompanyNamePh')} className="h-10 rounded-2xl border-black/20 bg-white" maxLength={120} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-bold">{t('profileCompanyCity')}</Label>
-                <Input value={companyCity} onChange={e => setCompanyCity(e.target.value)} placeholder={t('profileCompanyCityPh')} className="h-10 rounded-2xl border-black/20 bg-white" maxLength={80} />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs font-bold">{t('profileCompanyType')}</Label>
-              <div className="flex flex-wrap gap-2">
-                {types.map(ty => (
-                  <button key={ty} type="button" onClick={() => setCompanyType(ty)}
-                    className={`h-9 px-3 rounded-full border-2 text-xs font-semibold transition-colors ${companyType === ty ? 'bg-cta text-white border-cta' : 'bg-white border-black/20 hover:border-black'}`}>
-                    {t(typeKey(ty))}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* premium toggle */}
-            <button type="button" onClick={() => { const next = !premium; setPremium(next); void save({ premium: next }); }}
-              className={`w-full flex items-center justify-between gap-3 rounded-2xl border-2 p-3 text-left transition-colors ${premium ? 'border-amber-400 bg-amber-50' : 'border-black/15 hover:border-black/40'}`}>
-              <span className="flex items-center gap-2 min-w-0">
-                <Crown className={`w-4 h-4 shrink-0 ${premium ? 'text-amber-500' : 'text-muted-foreground'}`} />
-                <span className="min-w-0">
-                  <span className="block text-sm font-bold">{t('premiumToggle')}</span>
-                  <span className="block text-[11px] text-muted-foreground">{t('premiumHint')}</span>
-                </span>
-              </span>
-              <span className={`w-10 h-6 rounded-full p-0.5 shrink-0 transition-colors ${premium ? 'bg-amber-500' : 'bg-black/15'}`}>
-                <span className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${premium ? 'translate-x-4' : ''}`} />
-              </span>
-            </button>
-            <Button onClick={() => save()} disabled={saving} className="rounded-full h-9 px-4">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : savedFlash ? <CheckCircle2 className="w-4 h-4 mr-1 text-emerald-600" /> : null}
-              {t('save')}
-            </Button>
-          </>
-        )}
-      </CardContent>
-    </Card>
   );
 }

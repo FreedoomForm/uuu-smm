@@ -442,6 +442,7 @@ const en: Dict = {
   smmInviteConfirm: 'Confirm request submission',
   smmApplySent: 'Application sent',
   smmInviteSent: 'Invitation sent',
+  smmInviteNoTarget: 'Open a specialist\u2019s card first — the invite is sent from their card, profile or chat',
   // ЗАЯВКА БЕЗ ТЕСТА: the specialist attaches a LINK to the ad post/video
   smmApplyLink: 'Link to the ad post/video',
   smmApplyLinkPh: 'https://instagram.com/reel/…',
@@ -1162,6 +1163,7 @@ const ru: Dict = {
   smmInviteConfirm: 'Подтвердить отправку запроса',
   smmApplySent: 'Заявка отправлена',
   smmInviteSent: 'Приглашение отправлено',
+  smmInviteNoTarget: 'Сначала откройте карточку специалиста — приглашение отправляется из его карточки, профиля или чата',
   // ЗАЯВКА БЕЗ ТЕСТА: ссылка на рекламу вместо квалификационных тестов
   smmApplyLink: 'Ссылка на рекламный пост/видео',
   smmApplyLinkPh: 'https://instagram.com/reel/…',
@@ -1880,6 +1882,7 @@ const uz: Dict = {
   smmInviteConfirm: 'Soʻrov yuborishni tasdiqlash',
   smmApplySent: 'Ariza yuborildi',
   smmInviteSent: 'Taklif yuborildi',
+  smmInviteNoTarget: 'Avval mutaxassis kartochkasini ochingiz — taklif uning kartochkasi, profili yoki chatidan yuboriladi',
   // TESTSIZ ARIZA: reklama havolasi (test oʻrniga)
   smmApplyLink: 'Reklama posti/videosiga havola',
   smmApplyLinkPh: 'https://instagram.com/reel/…',

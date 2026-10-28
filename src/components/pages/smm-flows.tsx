@@ -27,9 +27,8 @@ import { tUI } from '@/lib/i18n';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
 import { useSmmStore } from '@/stores/smm-store';
-import { Check, Link2, Loader2, MapPin, Star, Users } from 'lucide-react';
+import { Check, Link2, Loader2, MapPin, Users } from 'lucide-react';
 import { EditorShell } from './smm-editors';
-import { fmtMoney } from './smm-bits';
 import type { SmmEventT, SmmPostT } from '@/lib/app-types';
 
 function useT() {
@@ -346,8 +345,8 @@ export function SmmInviteView() {
           </div>
         </CardContent>
       </Card>
-      {/* THE ROLE CHIPS («Выбрать другую роль»): switch the role the estimate
-      is computed for — the confirm sends the picked role */}
+      {/* THE ROLE CHIPS («Выбрать другую роль»): switch the role the invite
+      is sent for — the confirm sends the picked role */}
       {roleChips && (
         <div className="space-y-1.5">
           <p className="text-[11px] font-bold text-muted-foreground uppercase">{t('smmInvitePickRole')}</p>
@@ -361,45 +360,16 @@ export function SmmInviteView() {
           </div>
         </div>
       )}
-      {/* the chosen ROLE card (created by the specialist) */}
+      {/* the chosen ROLE card (created by the specialist) — name + specialist
+      only: the price lines are GONE (the user's cut) */}
       <Card className="rounded-4xl border border-black bg-white overflow-hidden">
         <div className="h-2 bg-[#FFE3D6]" />
         <CardContent className="p-4">
           <p className="text-[11px] font-bold text-muted-foreground uppercase">{t('smmPostRole')}</p>
           <p className="text-lg font-bold">{pickedRole ? pickedRole.name : inviteCtx.roleName || '—'}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{inviteCtx.specialistName}</p>
-          <div className="flex flex-col gap-1 mt-2 text-xs">
-            {(pickedRole ? pickedRole.pricePerK : inviteCtx.pricePerK) != null && (
-              <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-amber-500" /> {t('smmEstimateOnline')}: {fmtMoney((pickedRole ? pickedRole.pricePerK : inviteCtx.pricePerK) as number)}</p>
-            )}
-            {(pickedRole ? pickedRole.pricePerDay : inviteCtx.pricePerDay) != null && (
-              <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-amber-500" /> {t('smmEstimateOffline')}: {fmtMoney((pickedRole ? pickedRole.pricePerDay : inviteCtx.pricePerDay) as number)}</p>
-            )}
-          </div>
         </CardContent>
       </Card>
-      {/* the chosen EVENT card (the event picker's current pick) */}
-      <Card className="rounded-4xl border border-black bg-white overflow-hidden">
-        <div className="h-2 bg-[#E3EEFF]" />
-        <CardContent className="p-4">
-          <p className="text-[11px] font-bold text-muted-foreground uppercase">{t('smmEvent')}</p>
-          <p className="text-lg font-bold">{pickedEvent?.title || inviteCtx.eventTitle}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{effFormat === 'online' ? t('smmEstimateOnline') : t('smmEstimateOffline')}</p>
-        </CardContent>
-      </Card>
-      {/* the estimate */}
-      <Card className="rounded-4xl border-2 border-cta bg-white">
-        <CardContent className="p-4 text-center">
-          <p className="text-sm font-bold">{t('smmEstimate')}</p>
-          <p className="text-3xl font-extrabold text-cta mt-1">{estimate != null ? fmtMoney(estimate) : '—'}</p>
-          <p className="text-[11px] text-muted-foreground mt-1">
-            {effFormat === 'online' ? t('smmEstimateOnline') : t('smmEstimateOffline')}
-          </p>
-        </CardContent>
-      </Card>
-      {/* монетизация MVP: the commission line — info-only today, billed when
-      the platform-side payments land */}
-      <p className="text-[11px] text-muted-foreground text-center px-4">{t('commissionNote')}</p>
     </EditorShell>
   );
 }
