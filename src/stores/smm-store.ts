@@ -92,9 +92,6 @@ interface SmmData {
   activeCardId: string | null;
   // Role the specialist picked on an event card (their OWN role)
   pickedApplyRole: string | null;
-  // Event + role the customer picked on a specialist card
-  pickedInviteEvent: string | null;
-  pickedInviteRole: string | null;
   // Flow payloads
   applyCtx: SmmApplyCtx | null;
   inviteCtx: SmmInviteCtx | null;
@@ -127,8 +124,6 @@ const INITIAL: SmmData = {
   topWindow: 'none',
   activeCardId: null,
   pickedApplyRole: null,
-  pickedInviteEvent: null,
-  pickedInviteRole: null,
   applyCtx: null,
   inviteCtx: null,
   refreshNonce: 0,

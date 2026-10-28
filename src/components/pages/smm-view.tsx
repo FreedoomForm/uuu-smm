@@ -250,8 +250,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const topWindow = useSmmStore(s => s.topWindow);
   const activeCardId = useSmmStore(s => s.activeCardId);
   const pickedApplyRole = useSmmStore(s => s.pickedApplyRole);
-  const pickedInviteEvent = useSmmStore(s => s.pickedInviteEvent);
-  const pickedInviteRole = useSmmStore(s => s.pickedInviteRole);
   const refreshNonce = useSmmStore(s => s.refreshNonce);
   const openChatId = useSmmStore(s => s.openChatId);
   const profileUserId = useSmmStore(s => s.profileUserId);
@@ -265,7 +263,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const [items, setItems] = useState<AnyItem[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [myRoles, setMyRoles] = useState<{ id: string; name: string }[]>([]);
-  const [myEvents, setMyEvents] = useState<{ id: string; title: string; format?: 'online' | 'offline'; timeAt?: string; peopleRequired?: number }[]>([]);
   const [bookmarks, setBookmarks] = useState<import('@/lib/app-types').SmmBookmarkRowT[]>([]);
   const [chats, setChats] = useState<SmmChatT[]>([]);
   const [chatMessages, setChatMessages] = useState<import('@/lib/app-types').SmmChatMessageT[]>([]);
@@ -412,7 +409,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const key = `${myId}:${refreshNonce}`;
   const applyLists = useCallback((d: ListSnapshot) => {
     setMyRoles(d.roles.items.map((r) => ({ id: r.id, name: r.name })));
-    setMyEvents(d.evs.items.map((e: any) => ({ id: e.id, title: e.title, format: e.format, timeAt: (e as any).timeAt || '', peopleRequired: (e as any).peopleRequired || 0 })));
     setBookmarks(d.bms.items);
     setSmmBookmarksSet(new Set(d.bms.items.map((b: any) => `${b.targetType}:${b.targetId}`)));
     let list: AnyItem[] = [];
@@ -482,19 +478,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   }, [myId, isSpecialist, personal, isAdminUser, key, applyLists]);
 
   useEffect(() => { void loadLists(); }, [loadLists, refreshNonce]);
-
-  // The invite EVENT pick self-heals: as soon as the customer's own events
-  // are in (they load async), the pick defaults to the first one — and
-  // re-heals whenever the pick points nowhere (event deleted, stale state
-  // from an old session). The «пригласить» button must never sit disabled
-  // while the user HAS events.
-  useEffect(() => {
-    if (myEvents.length === 0) return;
-    const cur = useSmmStore.getState().pickedInviteEvent;
-    if (!cur || !myEvents.some(e => e.id === cur)) {
-      useSmmStore.setState({ pickedInviteEvent: myEvents[0].id });
-    }
-  }, [myEvents]);
 
   const loadRequests = useCallback(async () => {
     if (!myId) return;
@@ -681,13 +664,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       .then(r => {
         if (!alive) return;
         setProfileData(r);
-        // a customer viewing a specialist: heal the invite ROLE pick (it must
-        // be one of THIS user's roles) and remember them as the invite target
+        // a customer viewing a specialist: remember them as the invite
+        // target (the bottom-bar invite's fallback context)
         if (!isSpecialist && r.user.roles.length > 0) {
-          const curRole = useSmmStore.getState().pickedInviteRole;
-          if (!curRole || !r.user.roles.some(x => x.id === curRole)) {
-            useSmmStore.setState({ pickedInviteRole: r.user.roles[0].id });
-          }
           lastSpRef.current = { id: r.user.id, name: r.user.name, roles: r.user.roles };
         }
       })
@@ -848,7 +827,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
 
   const gotoLibrary = (discover: boolean) => {
     setDiscoverMode(discover);
-    useSmmStore.setState({ topWindow: 'none', activeCardId: null, openChatId: null, pickedApplyRole: null, pickedInviteEvent: null, pickedInviteRole: null, profileUserId: null, filesTarget: null, cardChat: null });
+    useSmmStore.setState({ topWindow: 'none', activeCardId: null, openChatId: null, pickedApplyRole: null, profileUserId: null, filesTarget: null, cardChat: null });
   };
 
   const toggleBookmark = async (targetType: 'event' | 'specialist' | 'post', targetId: string) => {
@@ -1544,36 +1523,6 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     return lastSpRef.current;
   };
 
-  // Приглашение: примерная сумма depends on the EVENT's format — онлайн =
-  // цена за 1000 просмотров, оффлайн = цена за день (8 часов).
-  const inviteFrom = (sp: { id: string; name: string; roles: SmmRoleT[] }, pickedEventId: string | null, pickedRoleId: string | null) => {
-    if (!sp) return;
-    // the picks self-heal: a stale id (deleted event/role, an old pick from
-    // a previous session) falls back to the first own event / first
-    // specialist role — the button never resolves into a silent no-op
-    const role = sp.roles.find(r => r.id === pickedRoleId) || sp.roles[0];
-    const ev = myEvents.find(e => e.id === pickedEventId) || myEvents[0];
-    if (!role || !ev) return;
-    const format: 'online' | 'offline' = ev.format === 'offline' ? 'offline' : 'online';
-    const estimate = format === 'online' ? (role.pricePerK ?? null) : (role.pricePerDay ?? null);
-    useSmmStore.setState({
-      inviteCtx: {
-        specialistId: sp.id,
-        specialistName: sp.name,
-        eventId: ev.id,
-        eventTitle: ev.title,
-        roleId: role.id,
-        roleName: role.name,
-        pricePerK: role.pricePerK ?? null,
-        pricePerDay: role.pricePerDay ?? null,
-        eventFormat: format,
-        estimate,
-      },
-      applyCtx: null,
-    });
-    setPage('smm-invite');
-  };
-
   // feed slide commit — the SAME contract the tests feed keeps: the visible
   // slide IS the active card (the bottom-bar заявка/приглашение action binds
   // to it).
@@ -1854,23 +1803,21 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
         if (!smmNow().pickedApplyRole) useSmmStore.setState({ pickedApplyRole: myRoles[0]?.id || null });
       }
       if (it.kind === 'specialist') {
-        // heal the picks: the role must be one of THIS specialist's, the
-        // event — one of the customer's own (stale ids re-default)
-        const curRole = smmNow().pickedInviteRole;
-        if (!curRole || !(it.roles || []).some(r => r.id === curRole)) useSmmStore.setState({ pickedInviteRole: it.roles[0]?.id || null });
-        const curEv = smmNow().pickedInviteEvent;
-        if (!curEv || !myEvents.some(e => e.id === curEv)) useSmmStore.setState({ pickedInviteEvent: myEvents[0]?.id || null });
+        // the seen specialist becomes the bottom-bar invite's fallback target
+        // (the пост card passes ITS specialist directly — no detours)
         lastSpRef.current = { id: it.id, name: it.name, roles: it.roles };
       }
     },
     myRoles,
     pickedRole: pickedApplyRole,
     onPickRole: (roleId: string) => useSmmStore.setState({ pickedApplyRole: roleId }),
-    myEvents,
-    pickedEvent: pickedInviteEvent,
-    pickedInvRole: pickedInviteRole,
-    onPickEvent: (eventId: string) => useSmmStore.setState({ pickedInviteEvent: eventId }),
-    onPickInvRole: (roleId: string) => useSmmStore.setState({ pickedInviteRole: roleId }),
+    // «ПРИГЛАСИТЬ НА ЗАКАЗ» on a FOREIGN пост card — the invite window opens
+    // RIGHT from the card with THIS post's specialist as the fixed target
+    // (roles load inside the window; the customer picks the event there) —
+    // no профиль detour (the user's cut). Own posts never carry it.
+    onInvite: it.kind === 'post' && it.specialistId !== myId
+      ? () => openInviteWindow({ id: it.specialistId, name: it.specialist?.name || '', roles: [] })
+      : undefined,
     selected,
     onImageOpen: (url: string) => setImgPreview(url),
   });

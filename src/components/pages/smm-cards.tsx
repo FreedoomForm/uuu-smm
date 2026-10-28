@@ -14,8 +14,11 @@
 //                             time) + share/chat/edit/bookmark/delete +
 //                             the specialist's role picker + «подать заявку»
 //   * SmmPostCardView       — video/photo collection + description per role
-//   * SmmSpecialistCardView — rating, orders count, roles+prices, the
-//                             event/role pickers + «пригласить на мероприятие»
+//                             + «Пригласить» on a FOREIGN post (the invite
+//                             window opens right from the card)
+//   * SmmSpecialistCardView — rating + orders count (the roles/prices and
+//                             the event/role pickers are GONE — the user's
+//                             cut; the invite lives on the пост card)
 // Plus the compact rows of the закладки / чаты / запросы windows.
 // ---------------------------------------------------------------------------
 
@@ -24,7 +27,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CreatorStrip, tagHash } from '@/components/shared-bits';
-import { fmtMoney, mediaSrc } from './smm-bits';
+import { mediaSrc } from './smm-bits';
 import { ChevronRight, ClipboardList, Bot, Film, Globe, LayoutGrid, Link2, MapPin, MessageCircle, Paperclip, Pencil, Sparkles, Star, Trash2, Users } from 'lucide-react';
 import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
 
@@ -61,12 +64,11 @@ export interface CardCtx {
   myRoles: { id: string; name: string }[];
   pickedRole: string | null;
   onPickRole: (roleId: string) => void;
-  // specialist card (customer side)
-  myEvents: { id: string; title: string }[];
-  pickedEvent: string | null;
-  pickedInvRole: string | null;
-  onPickEvent: (eventId: string) => void;
-  onPickInvRole: (roleId: string) => void;
+  // «Пригласить» — a FOREIGN пост card (the customer's публичная библиотека /
+  // feed / закладки): opens the invite window with THIS post's specialist as
+  // the FIXED target — the event is picked inside the window. Absent on own
+  // posts (the specialist never invites themselves) → the button never ships.
+  onInvite?: () => void;
   selected: boolean;
   onImageOpen?: (url: string) => void;
 }
@@ -425,6 +427,13 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
       <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('attachedFiles', { n: media.length + ((post.attachments || []).length) })} className={LADDER_BTN}>
         <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
       </Button>
+      {/* ПРИГЛАСИТЬ — a FOREIGN пост card: the invite window opens RIGHT from
+      the card (the event is picked inside it) — no профиль detour. */}
+      {ctx.onInvite && (
+        <Button size="sm" variant="outline" onClick={ctx.onInvite} title={t('smmInviteBtn')} className={LADDER_BTN}>
+          <Users className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmInviteShort')}</span>
+        </Button>
+      )}
       {/* THE PUBLISH PAIR — the SAME pair the заказ card keeps, on the
       specialist's own пост in the личная библиотека (a VERSION keeps the
       plain «Ссылка» — the server coerces its isPublic to false). */}
@@ -488,6 +497,7 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         <SlideBtn onClick={ctx.onAi} icon={<Bot className="w-4 h-4 shrink-0" />} label={t('aiDiscuss')} tone={ctx.aiActive ? 'ai' : undefined} />
         <SlideBtn onClick={ctx.onChat} icon={<MessageCircle className="w-4 h-4 shrink-0" />} label={t('gChat')} />
         <SlideBtn onClick={ctx.onFiles} icon={<Paperclip className="w-4 h-4 shrink-0" />} label={t('attachedFiles', { n: media.length + ((post.attachments || []).length) })} />
+        {ctx.onInvite && <SlideBtn onClick={ctx.onInvite} icon={<Users className="w-4 h-4 shrink-0 text-cta" />} label={t('smmInviteShort')} />}
         {pubPair ? (
           <>
             <SlideBtn onClick={ctx.onPubPublic!} icon={<Globe className="w-4 h-4 shrink-0 text-cta" />} label={t('smmPubPublic')} tone={ctx.isPublic ? 'pub' : undefined} />
@@ -609,44 +619,6 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
       </span>
     </div>
   );
-  const rolesPrices = (
-    <div className="shrink-0 flex flex-col gap-1">
-      <p className="text-[11px] font-semibold text-muted-foreground">{t('smmRolesList')}</p>
-      {(sp.roles || []).length === 0 && <p className="text-xs text-muted-foreground">—</p>}
-      {(sp.roles || []).map(r => (
-        <button
-          key={r.id}
-          type="button"
-          onClick={e => { e.stopPropagation(); ctx.onPickInvRole(r.id); }}
-          className={`flex items-center justify-between gap-2 rounded-xl border-2 px-2.5 py-1.5 text-left transition-colors ${ctx.pickedInvRole === r.id ? 'border-cta bg-[#FFF3ED]' : 'border-black/10 hover:border-black/30'}`}
-        >
-          <span className="text-xs sm:text-sm font-bold truncate">{r.name}</span>
-          <span className="text-[10px] sm:text-[11px] text-muted-foreground shrink-0 flex flex-col items-end leading-tight">
-            {r.pricePerK != null && <span>{t('smmEstimateOnline')}: {fmtMoney(r.pricePerK)}</span>}
-            {r.pricePerDay != null && <span>{t('smmEstimateOffline')}: {fmtMoney(r.pricePerDay)}</span>}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-  const eventPicker = (
-    <div className="shrink-0 flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
-      <p className="text-[11px] font-semibold text-muted-foreground">{t('smmInvitePickEvent')}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {(ctx.myEvents || []).length === 0 && <p className="text-[11px] text-muted-foreground">{t('smmInviteNoEvent')}</p>}
-        {(ctx.myEvents || []).map(ev => (
-          <button
-            key={ev.id}
-            type="button"
-            onClick={() => ctx.onPickEvent(ev.id)}
-            className={`h-7 max-w-[180px] px-2.5 rounded-full border-2 text-[11px] font-bold truncate transition-colors ${ctx.pickedEvent === ev.id ? 'bg-cta text-white border-cta' : 'bg-white border-black/20 hover:border-black'}`}
-          >
-            {ev.title}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
   const ladder = (
     <div className="card-ladder shrink-0 pt-1.5 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
       <Button size="sm" variant="outline" onClick={ctx.onAi} title={t('aiDiscuss')} className={`${LADDER_BTN} ${ctx.aiActive ? LADDER_AI_ACTIVE : ''}`}>
@@ -694,8 +666,6 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
         ladder={slideLadder}
       >
         {ratingLine}
-        <div className="mt-1.5">{rolesPrices}</div>
-        {eventPicker}
       </SlideCard>
     );
   }
@@ -718,8 +688,6 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
           <CardHeader ctx={ctx} name={sp.name} creatorId={sp.id} image={sp.image} compact />
           <div className="flex-1 min-h-0 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {ratingLine}
-            <div className="mt-1.5">{rolesPrices}</div>
-            {eventPicker}
           </div>
           {ladder}
         </div>
@@ -737,10 +705,6 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
       {/* grid: the plain bold name + the rating/orders line — the same title
       line the test grid cards wear under the strip */}
       {ratingLine}
-      {/* roles + prices (the 4 params live here: pricePerK + pricePerDay per role) */}
-      <div className="mt-2">{rolesPrices}</div>
-      {/* the customer's picks: event + role */}
-      <div className="mt-2">{eventPicker}</div>
       {ladder}
     </div>
   );
