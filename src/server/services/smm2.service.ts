@@ -719,11 +719,14 @@ export async function createApplication(
   });
   const me = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
   const chat = await directChatBetween(userId, event.customerId);
+  // The message carries the application id (ЗАЯВКА#<id>) — the chat UI binds
+  // the customer's ACCEPT/DECLINE buttons to THIS заявка through it (the
+  // same marker contract the ПРИГЛАШЕНИЕ#<id> message keeps).
   await postSystemMessage(
     chat.id,
     userId,
     me?.name || userName,
-    `ЗАЯВКА · «${event.title}» · роль «${role.name}» · реклама: ${proofUrl}${proofNote ? ` · ${proofNote}` : ""}`
+    `ЗАЯВКА#${app.id} · «${event.title}» · роль «${role.name}» · реклама: ${proofUrl}${proofNote ? ` · ${proofNote}` : ""}`
   );
   return app;
 }
@@ -1641,7 +1644,7 @@ export async function getChatMeta(userId: string, chatId: string) {
   if (!chat) throw ApiError.notFound("Chat not found");
   if (chat.aId !== userId && chat.bId !== userId) throw ApiError.forbidden("Not your chat");
   const peerId = (chat.aId === userId ? chat.bId : chat.aId) || "";
-  if (!peerId) return { invitations: [], deal: null, adminTicket: null };
+  if (!peerId) return { invitations: [], applications: [], deal: null, adminTicket: null };
   const pair = { OR: [
     { customerId: userId, specialistId: peerId },
     { customerId: peerId, specialistId: userId },
@@ -1687,6 +1690,16 @@ export async function getChatMeta(userId: string, chatId: string) {
       roleId: i.role.id, roleName: i.role.name,
       customerId: i.customerId, specialistId: i.specialistId,
       createdAt: i.createdAt,
+    })),
+    // THE ЗАЯВКА CARDS: the chat's ЗАЯВКА#<id> messages bind the customer's
+    // accept/decline buttons to THIS list (the same live mechanic the
+    // invitation cards keep) — every poll wake refreshes the statuses.
+    applications: apps.map((a) => ({
+      id: a.id, status: a.status,
+      eventTitle: a.event.title, roleName: a.role.name,
+      customerId: a.event.customerId, specialistId: a.specialistId,
+      proofUrl: a.proofUrl,
+      createdAt: a.createdAt,
     })),
     deal: deal ? {
       dealType: deal.dealType, dealId: deal.dealId, status: deal.status,
