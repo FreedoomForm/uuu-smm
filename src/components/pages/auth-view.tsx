@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { FlaskConical, Star, ClipboardList } from 'lucide-react';
+import { Star, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -62,11 +62,12 @@ export default function AuthView({ handleAuth, onCancel }: AuthViewProps) {
     <div className="min-h-screen flex items-center justify-center bg-background p-4 screen-enter">
       <Card className="w-full max-w-md lg:max-w-lg rounded-4xl border border-black shadow-lg bg-white">
         <CardHeader className="text-center pb-2">
-          <div className="mx-auto w-16 h-16 bg-cta rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-            <FlaskConical className="w-8 h-8 text-white" />
+          <div className="mx-auto w-16 h-16 mb-4 shadow-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.svg" alt="ADposter" className="w-16 h-16 rounded-2xl object-contain" />
           </div>
           <CardTitle className="text-2xl font-bold">
-            ChemTest
+            ADposter
           </CardTitle>
           <CardDescription>
             {authMode === 'login' ? t('signInToAccount') : (roleStep === 'role' ? t('createNewAccount') : t('createNewAccount'))}

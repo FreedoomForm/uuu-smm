@@ -72,3 +72,6 @@ analyze_images.sh
 start-server.sh
 Caddyfile
 worklog.md3210 file
+
+# chemtest-era course seed data (never again)
+/course-files/

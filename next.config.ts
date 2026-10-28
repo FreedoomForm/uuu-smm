@@ -6,6 +6,12 @@ const nextConfig: NextConfig = {
   },
   reactStrictMode: false,
   output: 'standalone',
+  // Perf: barrel-file packages are resolved per-symbol at build time, so the
+  // client bundle ships only the icons/charts/motion pieces actually imported
+  // (smaller First Load JS on every route).
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'recharts', 'framer-motion', 'date-fns'],
+  },
   // Perf: don't reveal the framework in response headers (smaller headers,
   // no fingerprinting). Compression itself is always on at the Vercel edge.
   poweredByHeader: false,
