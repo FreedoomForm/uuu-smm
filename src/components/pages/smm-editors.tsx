@@ -4,11 +4,13 @@
 // SMM EDITORS — the two creation screens opened by the contextual «+»:
 //
 //   SmmEventEditor — the test editor's twin MINUS the test machinery
-//     (no questions/answers, no slider, no shuffles, no practice/test mode)
-//     PLUS the order facts: format (online/offline), the online platform
-//     (instagram/telegram/youtube/tiktok) OR the location with a live map,
-//     the time — and the БЮДЖЕТ НА ОДНОГО СПЕЦИАЛИСТА (the qualification-tests
-//     picker is GONE: the заявка flow takes an ad link, not tests).
+//     (no questions/answers, no slider, no shuffles, no practice/test mode).
+//     The OLD «биржа услуг» facts (категория услуги, бюджет, формат,
+//     онлайн-площадка/локация с картой, время, цветной Cover) are GONE from
+//     the form per the user's cut — an order is now: cover photo + название
+//     + описание + теги + сколько людей требуется + задачи + файлы.
+//     (The qualification-tests picker is gone too: the заявка flow takes an
+//     ad link, not tests.)
 //
 //   SmmPostEditor — the specialist's post card: ONE role (existing or new
 //     with the two prices) + video/photo collection + description.
@@ -31,18 +33,16 @@ import { tUI } from '@/lib/i18n';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
 import { useSmmStore } from '@/stores/smm-store';
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Image as ImgIcon, Loader2, MapPin, Paperclip, Plus, Trash2, Users, Tag as TagIcon, ListChecks, Pencil, Minus, Upload } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Image as ImgIcon, Loader2, Paperclip, Plus, Trash2, Users, Tag as TagIcon, ListChecks, Pencil, Minus, Upload } from 'lucide-react';
 import LangButton from '@/components/lang-button';
 import { Collapse } from '@/components/motion';
-import { SMM_PLATFORMS, eventPlatformIcon, eventPlatformLabel, mapEmbedUrl, mediaSrc, fmtMoney, SmmToast } from './smm-bits';
+import { mediaSrc, fmtMoney, SmmToast } from './smm-bits';
 import type { SmmEventT, SmmPostT, SmmPostMedia, SmmAttachmentT } from '@/lib/app-types';
 import type { AttachmentItem } from '@/components/attachment-utils';
 
 // The «Прикреплённые файлы» editor — the SAME component the test editor
 // embeds (rows + «Add by link» / «Upload file», live upload spinners).
 const AttachmentsEditor = dynamic(() => import('@/components/attachments').then(m => m.AttachmentsEditor), { ssr: false, loading: () => null });
-
-const COVER_COLORS = ['#E3EEFF', '#DFF3E8', '#FFF0D9', '#FCE8F2', '#FFE3D6', '#E8E3FF'];
 
 export function EditorShell({ title, onBack, lang, cycleLang, children, saveLabel, onSave, saving, saveDisabled }: {
   title: string;
@@ -322,15 +322,6 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
 
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
-  // БИРЖА УСЛУГ: the service category + the barter text (blogger tours)
-  const [category, setCategory] = useState<string>('other');
-  const [barter, setBarter] = useState('');
-  // БЮДЖЕТ НА ОДНОГО SMM-СПЕЦИАЛИСТА — what one specialist gets for the order
-  const [budget, setBudget] = useState('');
-  const [format, setFormat] = useState<'online' | 'offline'>('online');
-  const [platform, setPlatform] = useState('instagram');
-  const [location, setLocation] = useState('');
-  const [timeAt, setTimeAt] = useState('');
   // legacy qualification tests: the picker is gone from the UI (the заявка
   // flow takes an ad LINK, not tests), but the ids ride along on update so
   // an old order never loses what it carried
@@ -343,7 +334,6 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
   const [peopleRequired, setPeopleRequired] = useState(1);
   const [tags, setTags] = useState<string[]>([]);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
-  const [coverColor, setCoverColor] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(true);
   // Version rule (the SAME one the tests keep): a VERSION (a copy of somebody
   // else's мероприятие) can never be public — the editor hides the publish
@@ -360,22 +350,16 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
         const e: SmmEventT = r.event;
         if (e.customerId !== myId) { onFail(); return; }
         setTitle(e.title); setSummary(e.summary || '');
-        setCategory((e as any).category || 'other'); setBarter((e as any).barter || '');
-        setBudget(e.budget || '');
-        setFormat(e.format || 'online'); setPlatform(e.platform || 'instagram');
-        setLocation(e.location || ''); setTimeAt(e.timeAt || '');
         setTestIds(e.testIds || []); setAttachments(((e as SmmEventT).attachments || []) as AttachmentItem[]);
         setChecklist(Array.isArray((e as any).checklist) ? (e as any).checklist : []);
         setPeopleRequired(Number((e as any).peopleRequired) > 0 ? Number((e as any).peopleRequired) : 1);
         setTags(Array.isArray((e as any).tags) ? (e as any).tags : []);
         setCoverUrl((e as any).coverUrl || null);
-        setCoverColor(e.coverColor || null);
         setIsVersion(!!e.parentId);
         setIsPublic(e.isPublic !== false);
       }).catch(() => onFail()).finally(() => setLoading(false));
     } else {
-      setTitle(''); setSummary(''); setCategory('other'); setBarter(''); setBudget(''); setFormat('online'); setPlatform('instagram');
-      setLocation(''); setTimeAt(''); setTestIds([]); setAttachments([]); setChecklist([]); setCoverColor(null); setIsPublic(true); setIsVersion(false);
+      setTitle(''); setSummary(''); setTestIds([]); setAttachments([]); setChecklist([]); setIsPublic(true); setIsVersion(false);
       setPeopleRequired(1); setTags([]); setCoverUrl(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -385,7 +369,11 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
     if (!title.trim()) { smmToast(t('smmEventTitle')); return; }
     setSaving(true); onSaving?.(true);
     try {
-      const payload = { title, summary, category, barter: category === 'blogger-tour' ? barter : '', budget, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, attachments, coverColor, isPublic, checklist: checklist.filter(c => c.label.trim() || c.desc.trim()), peopleRequired, tags, coverUrl };
+      // The «биржа услуг» facts (category/budget/format/platform/location/
+      // time/coverColor) are NOT collected any more — they are deliberately
+      // LEFT OUT of the payload: on update the server keeps whatever the old
+      // order carried (nothing is wiped), on create the DB defaults apply.
+      const payload = { title, summary, testIds, attachments, isPublic, checklist: checklist.filter(c => c.label.trim() || c.desc.trim()), peopleRequired, tags, coverUrl };
       const saved = editingId ? await api.updateEvent(editingId, payload) : await api.createEvent(payload);
       smmToast(t('smmEventSaved'));
       onSaved(saved as SmmEventT);
@@ -398,12 +386,10 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
 
   useImperativeHandle(ref, () => ({ save }));
 
-  const chip = (active: boolean) => `h-9 px-3 rounded-full border-2 text-xs sm:text-sm font-semibold transition-colors ${active ? 'bg-cta text-white border-cta' : 'bg-white border-black/20 hover:border-black'}`;
-
   return (
     <>
       {/* ── СЕКЦИЯ ВВОДА (раскрывается/скрывается): фото обложки + название +
-      описание + все факты заказа. Открыта при создании, сложена при правке. */}
+      описание. Открыта при создании, сложена при правке. */}
       <CollapsibleSection title={t('smmInputSection')} icon={<Pencil className="w-4 h-4 shrink-0" />} defaultOpen={!editingId}>
         <div className="flex flex-col gap-3">
           <CoverPhotoPicker url={coverUrl} onChange={setCoverUrl} t={t} />
@@ -414,74 +400,6 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm font-bold">{t('smmEventSummary')}</Label>
             <Textarea value={summary} onChange={e => setSummary(e.target.value)} rows={3} className="rounded-2xl border-black/20 bg-white" />
-          </div>
-          {/* ── БИРЖА УСЛУГ: the service category + the barter (blogger tours) ── */}
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm font-bold">{t('catLabel')}</Label>
-            <div className="flex flex-wrap gap-2">
-              {(['instagram', 'reels', 'hotel-review', 'photo', 'content-plan', 'blogger-tour', 'other'] as const).map(c => (
-                <button key={c} type="button" onClick={() => setCategory(c)} className={chip(category === c)}>
-                  {t(`cat${c === 'other' ? 'Other' : c === 'instagram' ? 'Instagram' : c === 'reels' ? 'Reels' : c === 'hotel-review' ? 'HotelReview' : c === 'photo' ? 'Photo' : c === 'content-plan' ? 'ContentPlan' : 'BloggerTour'}`)}
-                </button>
-              ))}
-            </div>
-          </div>
-          {category === 'blogger-tour' && (
-            <div className="flex flex-col gap-1.5 rounded-3xl border-2 border-cta/40 bg-[#FFF7ED] p-3">
-              <Label className="text-sm font-bold">{t('barterLabel')}</Label>
-              <Input value={barter} onChange={e => setBarter(e.target.value)} placeholder={t('barterPh')} className="h-10 rounded-2xl border-black/20 bg-white" />
-            </div>
-          )}
-          {/* ── БЮДЖЕТ НА ОДНОГО СПЕЦИАЛИСТА — what each SMM specialist gets ── */}
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm font-bold">{t('smmEventBudget')}</Label>
-            <Input value={budget} onChange={e => setBudget(e.target.value)} placeholder={t('smmEventBudgetPh')} className="h-10 rounded-2xl border-black/20 bg-white" />
-          </div>
-          {/* format */}
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm font-bold">{t('smmEventFormat')}</Label>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setFormat('online')} className={chip(format === 'online')}>{t('smmFormatOnline')}</button>
-              <button type="button" onClick={() => setFormat('offline')} className={chip(format === 'offline')}>{t('smmFormatOffline')}</button>
-            </div>
-          </div>
-          {format === 'online' ? (
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-sm font-bold">{t('smmEventPlatform')}</Label>
-              <div className="flex flex-wrap gap-2">
-                {SMM_PLATFORMS.map(p => (
-                  <button key={p} type="button" onClick={() => setPlatform(p)} className={`${chip(platform === p)} flex items-center gap-1.5`}>
-                    {eventPlatformIcon(p, 'w-4 h-4')} {eventPlatformLabel(p, t)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-sm font-bold">{t('smmEventLocation')}</Label>
-              <Input value={location} onChange={e => setLocation(e.target.value)} placeholder={t('smmEventLocationPh')} className="h-10 rounded-2xl border-black/20 bg-white" />
-              {location.trim().length > 2 && (
-                <div className="rounded-2xl overflow-hidden border border-black/10">
-                  <iframe src={mapEmbedUrl(location)} title={t('smmEventLocation')} loading="lazy" className="w-full h-40 border-0 pointer-events-none" />
-                  <p className="px-2.5 py-1.5 text-xs text-muted-foreground flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-cta" /> {location}</p>
-                </div>
-              )}
-            </div>
-          )}
-          {/* time */}
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm font-bold">{t('smmEventTime')}</Label>
-            <Input value={timeAt} onChange={e => setTimeAt(e.target.value)} placeholder={t('smmEventTimePh')} className="h-10 rounded-2xl border-black/20 bg-white" />
-          </div>
-          {/* cover colors stay as the fallback pick under the photo */}
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm font-bold">Cover</Label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {COVER_COLORS.map(c => (
-                <button key={c} type="button" onClick={() => setCoverColor(coverColor === c ? null : c)}
-                  className={`w-8 h-8 rounded-full border-2 ${coverColor === c ? 'border-black scale-110' : 'border-black/20'}`} style={{ backgroundColor: c }} />
-              ))}
-            </div>
           </div>
         </div>
       </CollapsibleSection>

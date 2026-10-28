@@ -265,7 +265,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const [items, setItems] = useState<AnyItem[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [myRoles, setMyRoles] = useState<{ id: string; name: string }[]>([]);
-  const [myEvents, setMyEvents] = useState<{ id: string; title: string; format?: 'online' | 'offline' }[]>([]);
+  const [myEvents, setMyEvents] = useState<{ id: string; title: string; format?: 'online' | 'offline'; timeAt?: string; peopleRequired?: number }[]>([]);
   const [bookmarks, setBookmarks] = useState<import('@/lib/app-types').SmmBookmarkRowT[]>([]);
   const [chats, setChats] = useState<SmmChatT[]>([]);
   const [chatMessages, setChatMessages] = useState<import('@/lib/app-types').SmmChatMessageT[]>([]);
@@ -412,7 +412,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const key = `${myId}:${refreshNonce}`;
   const applyLists = useCallback((d: ListSnapshot) => {
     setMyRoles(d.roles.items.map((r) => ({ id: r.id, name: r.name })));
-    setMyEvents(d.evs.items.map((e: any) => ({ id: e.id, title: e.title, format: e.format })));
+    setMyEvents(d.evs.items.map((e: any) => ({ id: e.id, title: e.title, format: e.format, timeAt: (e as any).timeAt || '', peopleRequired: (e as any).peopleRequired || 0 })));
     setBookmarks(d.bms.items);
     setSmmBookmarksSet(new Set(d.bms.items.map((b: any) => `${b.targetType}:${b.targetId}`)));
     let list: AnyItem[] = [];

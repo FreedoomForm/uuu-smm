@@ -147,7 +147,7 @@ export function SmmApplyView() {
                 <p className="text-[11px] font-bold text-muted-foreground uppercase">{t('smmEvent')}</p>
                 <p className="text-lg font-bold">{event.title}</p>
                 <div className="flex flex-wrap gap-1.5 mt-2 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {event.format === 'online' ? t('smmFormatOnline') : event.location || t('smmFormatOffline')}</span>
+                  {event.format === 'offline' && event.location && <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {event.location}</span>}
                   {event.timeAt && <span>· {event.timeAt}</span>}
                 </div>
               </CardContent>
@@ -334,7 +334,7 @@ export function SmmInviteView() {
                     <span className="text-sm font-bold truncate">{ev.title}</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-1 text-[11px] text-muted-foreground">
-                    <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {ev.format === 'online' ? t('smmFormatOnline') : ev.location || t('smmFormatOffline')}</span>
+                    {ev.format === 'offline' && ev.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {ev.location}</span>}
                     {ev.timeAt && <span>· {ev.timeAt}</span>}
                     {Number((ev as any).peopleRequired) > 0 && (
                       <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {t('smmPeopleRequired')}: {(ev as any).peopleRequired}</span>

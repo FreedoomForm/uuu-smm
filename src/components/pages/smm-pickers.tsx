@@ -167,7 +167,7 @@ export function SmmInviteWindow({ open, onClose, t, sp, onSent }: {
                             <span className="text-sm font-bold truncate">{ev.title}</span>
                           </div>
                           <div className="flex flex-wrap gap-1.5 mt-1 text-[11px] text-muted-foreground">
-                            <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {ev.format === 'online' ? t('smmFormatOnline') : ev.location || t('smmFormatOffline')}</span>
+                            {ev.format === 'offline' && ev.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {ev.location}</span>}
                             {ev.timeAt && <span>· {ev.timeAt}</span>}
                             {Number((ev as any).peopleRequired) > 0 && (
                               <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {t('smmPeopleRequired')}: {(ev as any).peopleRequired}</span>
@@ -376,7 +376,7 @@ export function SmmApplyWindow({ open, onClose, t, peerId, preEventId, preRoleId
                             <span className="text-sm font-bold truncate">{ev.title}</span>
                           </div>
                           <div className="flex flex-wrap gap-1.5 mt-1 text-[11px] text-muted-foreground">
-                            <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {ev.format === 'online' ? t('smmFormatOnline') : ev.location || t('smmFormatOffline')}</span>
+                            {ev.format === 'offline' && ev.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {ev.location}</span>}
                             {ev.timeAt && <span>· {ev.timeAt}</span>}
                             {Number((ev as any).peopleRequired) > 0 && (
                               <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {t('smmPeopleRequired')}: {(ev as any).peopleRequired}</span>

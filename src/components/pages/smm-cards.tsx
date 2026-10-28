@@ -24,8 +24,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CreatorStrip, tagHash } from '@/components/shared-bits';
-import { eventPlatformIcon, eventPlatformLabel, fmtMoney, mapEmbedUrl, mediaSrc } from './smm-bits';
-import { CalendarClock, ChevronRight, ClipboardList, Bot, Briefcase, Film, Globe, Handshake, LayoutGrid, Link2, MapPin, Megaphone, MessageCircle, Paperclip, Pencil, Sparkles, Star, Trash2, Users, Wallet } from 'lucide-react';
+import { fmtMoney, mediaSrc } from './smm-bits';
+import { ChevronRight, ClipboardList, Bot, Film, Globe, LayoutGrid, Link2, MapPin, MessageCircle, Paperclip, Pencil, Sparkles, Star, Trash2, Users } from 'lucide-react';
 import type { SmmEventT, SmmPostT, SmmSpecialistT } from '@/lib/app-types';
 
 export type CardVariant = 'grid' | 'shelf' | 'slide' | 'feed';
@@ -203,41 +203,13 @@ const CARD_SHELL = 'h-full min-h-0 flex flex-col rounded-2xl border bg-white p-2
 
 export function EventFacts({ event, t, compact, feed }: { event: SmmEventT; t: CardCtx['t']; compact?: boolean; feed?: boolean }) {
   const chip = 'flex items-center gap-1.5 rounded-full bg-white/90 border border-black/10 px-2.5 py-1 text-[11px] sm:text-xs font-semibold text-black/80 shadow-sm';
-  // БИРЖА УСЛУГ: the category chip (the i18n key pattern: cat + PascalCase)
-  const catKey = (() => {
-    switch (event.category) {
-      case 'instagram': return 'catInstagram';
-      case 'reels': return 'catReels';
-      case 'hotel-review': return 'catHotelReview';
-      case 'photo': return 'catPhoto';
-      case 'content-plan': return 'catContentPlan';
-      case 'blogger-tour': return 'catBloggerTour';
-      default: return '';
-    }
-  })();
-  const catLabel = catKey ? t(catKey) : '';
+  // The «биржа услуг» facts (категория, бартер, бюджет, формат/площадка,
+  // время, карта локации) are GONE from the cards per the user's cut — the
+  // only fact left is СКОЛЬКО ЛЮДЕЙ: how many specialists are accepted
+  // already and how many slots remain (peopleRequired − accepted).
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap gap-1.5">
-        {catLabel && (
-          <span className={`${chip} ${event.category === 'blogger-tour' ? 'border-cta/50 bg-[#FFF7ED] text-cta' : ''}`}>
-            {event.category === 'blogger-tour' ? <Megaphone className="w-3.5 h-3.5 shrink-0" /> : <Briefcase className="w-3.5 h-3.5 text-cta shrink-0" />} {catLabel}
-          </span>
-        )}
-        {event.category === 'blogger-tour' && (event as any).barter && (
-          <span className={`${chip} border-cta/50 bg-[#FFF7ED] text-cta`}>
-            <Handshake className="w-3.5 h-3.5 shrink-0" /> {t('barterBadge')}: {(event as any).barter}
-          </span>
-        )}
-        {/* БЮДЖЕТ НА ОДНОГО СПЕЦИАЛИСТА — the order's payment line (text:
-        «500 000 сум», «бартер», «договорная»…) */}
-        {(event as any).budget && (
-          <span className={`${chip} border-cta/40 bg-[#FFF7ED]`}>
-            <Wallet className="w-3.5 h-3.5 text-cta shrink-0" /> {t('smmBudgetPer')}: {(event as any).budget}
-          </span>
-        )}
-        {/* СКОЛЬКО ЛЮДЕЙ: the card shows how many specialists are accepted
-        already and how many slots remain (peopleRequired − accepted) */}
         {Number((event as any).peopleRequired) > 0 && (() => {
           const need = Number((event as any).peopleRequired) || 1;
           const acc = Number((event as any).acceptedCount) || 0;
@@ -247,32 +219,7 @@ export function EventFacts({ event, t, compact, feed }: { event: SmmEventT; t: C
             </span>
           );
         })()}
-        <span className={chip}>
-          {event.format === 'online'
-            ? <>{eventPlatformIcon(event.platform, 'w-3.5 h-3.5')} {t('smmFormatOnline')} · {eventPlatformLabel(event.platform, t)}</>
-            : <><MapPin className="w-3.5 h-3.5 text-cta shrink-0" /> {t('smmFormatOffline')}</>}
-        </span>
-        {event.timeAt && (
-          <span className={chip}><CalendarClock className="w-3.5 h-3.5 text-cta shrink-0" /> {event.timeAt}</span>
-        )}
       </div>
-      {/* The offline map — the feed (and window) cards carry the live map;
-      grid cards stay compact like the test grid cards (the chips above keep
-      the факт visible). The feed spine layout keeps the map shorter so the
-      whole card fits the snap page. */}
-      {!compact && event.format === 'offline' && event.location && (
-        <div className="rounded-2xl overflow-hidden border border-black/10 bg-white">
-          <iframe
-            src={mapEmbedUrl(event.location)}
-            title={t('smmEventLocation')}
-            loading="lazy"
-            className={`w-full ${feed ? 'h-16 sm:h-24' : 'h-28 sm:h-36'} border-0 pointer-events-none`}
-          />
-          <p className="px-2.5 py-1.5 text-[11px] sm:text-xs text-muted-foreground flex items-center gap-1.5">
-            <MapPin className="w-3.5 h-3.5 shrink-0 text-cta" /> <span className="truncate">{event.location}</span>
-          </p>
-        </div>
-      )}
     </div>
   );
 }
