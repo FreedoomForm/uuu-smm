@@ -393,6 +393,17 @@ export interface SmmChatInvitationT {
   createdAt?: string;
 }
 
+export interface SmmChatApplicationT {
+  id: string;
+  status: 'pending' | 'accepted' | 'declined' | 'completed' | string;
+  eventTitle: string;
+  roleName: string;
+  customerId: string;
+  specialistId: string;
+  proofUrl?: string | null;
+  createdAt?: string;
+}
+
 export interface SmmChatDealT {
   dealType: 'application' | 'invitation';
   dealId: string;
@@ -405,6 +416,7 @@ export interface SmmChatDealT {
 
 export interface SmmChatMetaT {
   invitations: SmmChatInvitationT[];
+  applications: SmmChatApplicationT[];
   deal: SmmChatDealT | null;
   adminTicket: { id: string; kind: string; status: string } | null;
 }
