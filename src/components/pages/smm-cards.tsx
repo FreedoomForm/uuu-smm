@@ -335,7 +335,7 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
         </>
       ) : (
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
-          <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
+          <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmCopyLink')}</span>
         </Button>
       )}
       {ctx.onEdit && (
@@ -371,7 +371,7 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
             <SlideBtn onClick={ctx.onPubLink!} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('smmPubLink')} tone={ctx.isPublic ? undefined : 'pub'} />
           </>
         ) : (
-          <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('gShare')} />
+          <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('smmCopyLink')} />
         )}
         {ctx.onEdit && <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />}
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
@@ -492,7 +492,7 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         </>
       ) : (
         <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
-          <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gShare')}</span>
+          <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmCopyLink')}</span>
         </Button>
       )}
       {ctx.onEdit && (
@@ -547,7 +547,7 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
             <SlideBtn onClick={ctx.onPubLink!} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('smmPubLink')} tone={ctx.isPublic ? undefined : 'pub'} />
           </>
         ) : (
-          <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('gShare')} />
+          <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('smmCopyLink')} />
         )}
         {ctx.onEdit && <SlideBtn onClick={ctx.onEdit} icon={<Pencil className="w-4 h-4 shrink-0" />} label={t('gEdit')} />}
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
@@ -711,6 +711,12 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
       <Button size="sm" variant="outline" onClick={ctx.onFiles} title={t('gFiles')} className={LADDER_BTN}>
         <Paperclip className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gFiles')}</span>
       </Button>
+      {/* СКОПИРОВАТЬ ССЫЛКУ — the specialist card's link button (the customer's
+      публичная библиотека): copies the ?specialist=<id> deep link that opens
+      THIS specialist's profile window. */}
+      <Button size="sm" variant="outline" onClick={ctx.onShare} title={t('smmShareCopied')} className={LADDER_BTN}>
+        <Link2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('smmCopyLink')}</span>
+      </Button>
       <Button size="sm" variant="outline" onClick={ctx.onDelete} title={t('smmSpecialistDeleted')} className={`${LADDER_BTN} border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive`}>
         <Trash2 className="size-3 lg:size-3.5 shrink-0" /> <span className="truncate">{t('gDelete')}</span>
       </Button>
@@ -727,6 +733,7 @@ export function SmmSpecialistCardView({ sp, variant, ctx }: { sp: SmmSpecialistT
         <SlideBtn onClick={ctx.onAi} icon={<Bot className="w-4 h-4 shrink-0" />} label={t('aiDiscuss')} tone={ctx.aiActive ? 'ai' : undefined} />
         <SlideBtn onClick={ctx.onChat} icon={<MessageCircle className="w-4 h-4 shrink-0" />} label={t('gChat')} />
         <SlideBtn onClick={ctx.onFiles} icon={<Paperclip className="w-4 h-4 shrink-0" />} label={t('gFiles')} />
+        <SlideBtn onClick={ctx.onShare} icon={<Link2 className="w-4 h-4 shrink-0 text-cta" />} label={t('smmCopyLink')} />
         <SlideBtn onClick={ctx.onDelete} icon={<Trash2 className="w-4 h-4 shrink-0" />} label={t('gDelete')} tone="danger" />
       </>
     );

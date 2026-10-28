@@ -878,7 +878,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     }
   };
 
-  const doShare = async (kind: 'event' | 'post', id: string) => {
+  const doShare = async (kind: 'event' | 'post' | 'specialist', id: string) => {
     const url = `${window.location.origin}/?${kind}=${id}`;
     try {
       await navigator.clipboard.writeText(url);
@@ -1599,19 +1599,25 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
     }
   }, [activeEventId, pickedApplyRole, myRoles, isSpecialist, myId]);
 
-  // ── THE DEEP LINK (?event=<id> / ?post=<id>) — the link the «Ссылка» and
-  // «Опубликовать…» buttons copy. Opening it fetches the card (getEvent /
-  // getPost do NOT gate on isPublic — the link IS the access for the
-  // «опубликовать только тем, у кого есть ссылка» mode), appends it to the
-  // current library (applyLists keeps it through every refresh) and selects
-  // it. The param is cleaned from the URL so a reload does not re-append.
+  // ── THE DEEP LINK (?event=<id> / ?post=<id> / ?specialist=<id>) — the link
+  // the «Скопировать ссылку» / «Опубликовать…» buttons copy. Opening it
+  // fetches the card (getEvent / getPost do NOT gate on isPublic — the link
+  // IS the access for the «опубликовать только тем, у кого есть ссылка»
+  // mode), appends it to the current library (applyLists keeps it through
+  // every refresh) and selects it. A specialist's link opens THEIR profile
+  // window. The param is cleaned from the URL so a reload does not re-open.
   useEffect(() => {
     try {
       const q = new URLSearchParams(window.location.search);
       const evId = q.get('event');
       const poId = q.get('post');
-      if (!evId && !poId) return;
+      const spId = q.get('specialist');
+      if (!evId && !poId && !spId) return;
       window.history.replaceState({}, '', window.location.pathname);
+      if (spId && !evId && !poId) {
+        useSmmStore.setState({ profileUserId: spId, topWindow: 'profile', openChatId: null });
+        return;
+      }
       const adopt = (item: AnyItem) => {
         deepItemRef.current = item;
         seenItemsRef.current[item.id] = item;
@@ -1823,7 +1829,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       // SmmSosTicketCard / adminOpenTicketChat before this ctx is built)
       useSmmStore.setState({ cardChat: { kind: it.kind as SmmCardChatTarget['kind'], id: it.id, title }, topWindow: 'card-chat', openChatId: null });
     },
-    onShare: () => { if (it.kind === 'event' || it.kind === 'post') void doShare(it.kind, it.id); },
+    onShare: () => { if (it.kind === 'event' || it.kind === 'post' || it.kind === 'specialist') void doShare(it.kind, it.id); },
     // «Изменить» — only an OWN мероприятие/пост in the ЛИЧНАЯ библиотека
     // wears the button (the публичная and strangers' cards stay read-only;
     // the specialist card is edited through the profile instead).
