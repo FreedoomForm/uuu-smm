@@ -229,6 +229,17 @@ export function EventFacts({ event, t, compact, feed }: { event: SmmEventT; t: C
             <Wallet className="w-3.5 h-3.5 text-cta shrink-0" /> {t('smmBudgetPer')}: {(event as any).budget}
           </span>
         )}
+        {/* СКОЛЬКО ЛЮДЕЙ: the card shows how many specialists are accepted
+        already and how many slots remain (peopleRequired − accepted) */}
+        {Number((event as any).peopleRequired) > 0 && (() => {
+          const need = Number((event as any).peopleRequired) || 1;
+          const acc = Number((event as any).acceptedCount) || 0;
+          return (
+            <span className={`${chip} ${acc >= need ? 'border-cta/50 bg-[#DFF3E8]' : ''}`}>
+              <Users className="w-3.5 h-3.5 text-cta shrink-0" /> {t('smmPeopleChip', { a: Math.min(acc, need), l: Math.max(0, need - acc) })}
+            </span>
+          );
+        })()}
         <span className={chip}>
           {event.format === 'online'
             ? <>{eventPlatformIcon(event.platform, 'w-3.5 h-3.5')} {t('smmFormatOnline')} · {eventPlatformLabel(event.platform, t)}</>
@@ -319,6 +330,9 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
       </Button>
     </div>
   );
+  // the cover photo (the editor's «Фото обложки») — the spine and the slide
+  // wear it INSTEAD of the pastel colour when present
+  const eventCoverImg = (event as any).coverUrl ? mediaSrc((event as any).coverUrl) : null;
   // the SPINE layout serves both the feed window cards AND the shelf cards —
   // the same horizontal anatomy the test cards keep in both modes (the shell
   // differs: the feed caps tablets at max-w-md, the shelf uses the test
@@ -350,6 +364,11 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
         title={event.title}
         ladder={slideLadder}
       >
+        {eventCoverImg && (
+          <div className="rounded-2xl overflow-hidden border border-black/10 shrink-0">
+            <img src={eventCoverImg} alt="" className="w-full h-28 sm:h-36 object-cover" />
+          </div>
+        )}
         <EventFacts event={event} t={t} feed />
         {event.summary && <p className="mt-1.5 text-[11px] sm:text-xs text-muted-foreground line-clamp-2">{event.summary}</p>}
         {rolePicker}
@@ -370,8 +389,12 @@ export function SmmEventCardView({ event, variant, ctx }: { event: SmmEventT; va
         onClick={ctx.onOpen}
         className={`${SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'}`}
       >
-        <div style={bgStyle} className={`${bgClass} ${FEED_SPINE}`}>
-          <p className={FEED_SPINE_TITLE}>{event.title}</p>
+        <div style={bgStyle} className={`${bgClass} ${FEED_SPINE} ${eventCoverImg ? '!p-0 relative overflow-hidden' : ''}`}>
+          {eventCoverImg ? (
+            <img src={eventCoverImg} alt="" loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover" />
+          ) : (
+            <p className={FEED_SPINE_TITLE}>{event.title}</p>
+          )}
         </div>
         <div className={FEED_CONTENT}>
           <CardHeader ctx={ctx} name={event.customer?.name || ''} creatorId={event.customerId} image={event.customer?.image} compact />
@@ -458,6 +481,8 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
       <Sparkles className="w-3 h-3 shrink-0" /> {t('smmAutoPost')}
     </span>
   );
+  // the cover photo (the editor's «Фото обложки») — the spine/slide wear it
+  const postCoverImg = (post as any).coverUrl ? mediaSrc((post as any).coverUrl) : null;
   // the media thumbs — the post's specifics line (the place the test feed
   // card keeps its tags/question-count lines)
   const thumbs = (
@@ -502,6 +527,11 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         title={title}
         ladder={slideLadder}
       >
+        {postCoverImg && (
+          <div className="rounded-2xl overflow-hidden border border-black/10 shrink-0">
+            <img src={postCoverImg} alt="" className="w-full h-28 sm:h-36 object-cover" />
+          </div>
+        )}
         {autoBadge}
         {thumbs}
         {post.description && <p className="text-[11px] sm:text-xs text-muted-foreground whitespace-pre-wrap line-clamp-3">{post.description}</p>}
@@ -521,8 +551,12 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
         onClick={ctx.onOpen}
         className={`${SHELL} ${ctx.selected ? 'border-cta ring-2 ring-cta/60' : 'border-black/15'}`}
       >
-        <div style={bgStyle} className={`${bgClass} ${FEED_SPINE}`}>
-          <p className={FEED_SPINE_TITLE}>{title}</p>
+        <div style={bgStyle} className={`${bgClass} ${FEED_SPINE} ${postCoverImg ? '!p-0 relative overflow-hidden' : ''}`}>
+          {postCoverImg ? (
+            <img src={postCoverImg} alt="" loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover" />
+          ) : (
+            <p className={FEED_SPINE_TITLE}>{title}</p>
+          )}
         </div>
         <div className={FEED_CONTENT}>
           <CardHeader ctx={ctx} name={post.specialist?.name || ''} creatorId={post.specialistId} image={post.specialist?.image} compact />
@@ -557,6 +591,8 @@ export function SmmPostCardView({ post, variant, ctx }: { post: SmmPostT; varian
           ) : (
             <img src={mediaSrc(first.url)} alt="" className="w-full h-full object-cover" />
           )
+        ) : postCoverImg ? (
+          <img src={postCoverImg} alt="" className="w-full h-full object-cover" />
         ) : (
           <div style={bgStyle} className={`${bgClass} w-full h-full flex items-center justify-center`}>
             <p className="text-sm font-bold text-cta line-clamp-2 px-2">{title}</p>

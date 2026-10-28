@@ -116,6 +116,10 @@ interface SmmData {
   chatPage: SmmChatPageCtx | null;
   // The deal whose checklist window is open (topWindow === 'checklist')
   checklistCtx: SmmChecklistCtx | null;
+  // THE «Фильтры» SHEET — the active library sort ('' = no sort): the top
+  // panel button opens a bottom sheet with the 6 sort buttons of the CURRENT
+  // surface (events: slots/requests/name — posts&specialists: posts/reviews/name)
+  sortKey: string;
 }
 
 const INITIAL: SmmData = {
@@ -135,6 +139,7 @@ const INITIAL: SmmData = {
   cardChat: null,
   chatPage: null,
   checklistCtx: null,
+  sortKey: '',
   applyResults: {},
 };
 

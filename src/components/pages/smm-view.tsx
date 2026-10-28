@@ -29,7 +29,7 @@ import { tUI } from '@/lib/i18n';
 import { CreatorStrip } from '@/components/shared-bits';
 import {
   ArrowLeft, Bot, Check, ChevronDown, ChevronUp, Compass, Edit, Film, Library, LayoutGrid, Link2, Loader2, MessageCircle, MessageSquare,
-  Paperclip, Pencil, Play, Plus, Rows3, Scale, Search, Send, Star, Trash2, X, ClipboardList, ClipboardCheck, Siren, Shield, Upload,
+  Paperclip, Pencil, Play, Plus, Rows3, Scale, Search, Send, SlidersHorizontal, Star, Trash2, Users, X, ClipboardList, ClipboardCheck, Siren, Shield, Upload,
   Map as MapIcon,
 } from 'lucide-react';
 // Professional feed engine — the SAME Swiper setup the tests feed runs
@@ -253,6 +253,7 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const cardChat = useSmmStore(s => s.cardChat);
   const chatPage = useSmmStore(s => s.chatPage);
   const checklistCtx = useSmmStore(s => s.checklistCtx);
+  const sortKey = useSmmStore(s => s.sortKey);
 
   // ── data ────────────────────────────────────────────────────────────────
   const [items, setItems] = useState<AnyItem[]>([]);
@@ -312,6 +313,10 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
+  // THE «ФИЛЬТРЫ» SHEET — the bottom sheet with the 6 sort buttons of the
+  // current library (the top-panel button opens it; the active sort lives in
+  // the smm store so it survives the library/mode switches)
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // MY PROFILE sheet (the avatar's bottom page) + the ИИ-АГЕНТ sheet (the
   // one-button platform automation)
   const [meOpen, setMeOpen] = useState(false);
@@ -750,16 +755,55 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
 
   // ── derived ─────────────────────────────────────────────────────────────
   const q = search.trim().toLowerCase();
+  // ── THE «ФИЛЬТРЫ» SHEET — the 6 sort buttons of the CURRENT surface:
+  //   события (личная заказчика / публичная СММ): свободные места ↓/↑,
+  //     запросы ↓/↑, название А→Я/Я→А;
+  //   посты и специалисты (публичная заказчика / личная СММ): посты ↓/↑,
+  //     отзывы ↓/↑, имя А→Я/Я→А.
+  const sortKeys = isSpecialist
+    ? (personal
+        ? ['posts-desc', 'posts-asc', 'rev-desc', 'rev-asc', 'az', 'za']
+        : ['slots-desc', 'slots-asc', 'req-desc', 'req-asc', 'az', 'za'])
+    : (personal
+        ? ['slots-desc', 'slots-asc', 'req-desc', 'req-asc', 'az', 'za']
+        : ['posts-desc', 'posts-asc', 'rev-desc', 'rev-asc', 'az', 'za']);
+  const sortLabels = isSpecialist
+    ? (personal
+        ? [t('smmFilterPostsDesc'), t('smmFilterPostsAsc'), t('smmFilterRevDesc'), t('smmFilterRevAsc'), t('smmFilterNameAz'), t('smmFilterNameZa')]
+        : [t('smmFilterSlotsDesc'), t('smmFilterSlotsAsc'), t('smmFilterReqDesc'), t('smmFilterReqAsc'), t('smmFilterAz'), t('smmFilterZa')])
+    : (personal
+        ? [t('smmFilterSlotsDesc'), t('smmFilterSlotsAsc'), t('smmFilterReqDesc'), t('smmFilterReqAsc'), t('smmFilterAz'), t('smmFilterZa')]
+        : [t('smmFilterPostsDesc'), t('smmFilterPostsAsc'), t('smmFilterRevDesc'), t('smmFilterRevAsc'), t('smmFilterNameAz'), t('smmFilterNameZa')]);
   const filtered = useMemo(() => {
-    if (!q) return items;
-    return items.filter((it: any) => {
+    const base = !q ? items : items.filter((it: any) => {
       const hay = it.kind === 'ticket'
         ? [it.peerNames, it.eventTitle, it.reason, it.createdByName].filter(Boolean).join(' ').toLowerCase()
-        : [it.title, it.summary, it.description, it.name, it.role?.name, it.specialist?.name, it.customer?.name]
+        : [it.title, it.summary, it.description, it.name, it.role?.name, it.specialist?.name, it.customer?.name, ...(Array.isArray(it.tags) ? it.tags : [])]
           .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [items, q]);
+    if (!sortKey || sortKey === 'none') return base;
+    const coll = new Intl.Collator('ru');
+    const num = (v: any) => Number(v) || 0;
+    const slots = (it: any) => Math.max(0, (num(it.peopleRequired) || 1) - num(it.acceptedCount));
+    const arr: any[] = [...base];
+    const byNum = (get: (x: any) => number) => (x: any, y: any) => get(y) - get(x);
+    const byName = (get: (x: any) => string, mul = 1) => (x: any, y: any) => mul * coll.compare(get(x) || '', get(y) || '');
+    const nameOf = (it: any) => it.kind === 'post' ? (it.role?.name || '') : (it.name || it.title || '');
+    switch (sortKey) {
+      case 'slots-desc': arr.sort(byNum(slots)); break;
+      case 'slots-asc': arr.sort((a, b) => slots(a) - slots(b)); break;
+      case 'req-desc': arr.sort(byNum((it: any) => num(it.requestsCount))); break;
+      case 'req-asc': arr.sort((a, b) => num(a.requestsCount) - num(b.requestsCount)); break;
+      case 'posts-desc': arr.sort(byNum((it: any) => num(it.postCount ?? it.authorPostCount))); break;
+      case 'posts-asc': arr.sort((a, b) => num(a.postCount ?? a.authorPostCount) - num(b.postCount ?? b.authorPostCount)); break;
+      case 'rev-desc': arr.sort(byNum((it: any) => num(it.reviewsCount ?? it.authorReviewCount))); break;
+      case 'rev-asc': arr.sort((a, b) => num(a.reviewsCount ?? a.authorReviewCount) - num(b.reviewsCount ?? b.authorReviewCount)); break;
+      case 'az': arr.sort(byName(nameOf)); break;
+      case 'za': arr.sort(byName(nameOf, -1)); break;
+    }
+    return arr;
+  }, [items, q, sortKey]);
 
   const gridPerRow = dashView === 'shelf' ? 1 : (dashView === 'library' && libNarrow ? 2 : (libUltra ? 5 : libWide ? 4 : 3));
   const isGrid = dashView === 'library' || dashView === 'shelf';
@@ -981,6 +1025,22 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
         void openChatWith(row.counterpartyId, row.counterpartyName, row.eventTitle);
       }
     } catch (e: any) { toast(e?.message || 'Error'); }
+  };
+
+  // ── ЧАТ: «Пригласить на мероприятие» — the customer invites the chat peer
+  // right from the dialog: the profile's roles seed the invite flow, the
+  // EVENT PICKER on the invite screen picks the event, and the picked event
+  // lands as the ПРИГЛАШЕНИЕ message in THIS chat.
+  const invitePeerFromChat = async (peerId: string, peerName: string) => {
+    if (!peerId) return;
+    setBusy(true);
+    try {
+      const prof = await api.getSmmProfile(peerId).catch(() => null);
+      const roles = (prof?.user?.roles || []) as SmmRoleT[];
+      if (roles.length === 0) { toast(t('smmInviteNoRoles')); return; }
+      useSmmStore.setState({ topWindow: 'none', openChatId: null, chatPage: null });
+      inviteFrom({ id: peerId, name: peerName || (prof?.user?.name || ''), roles }, smmNow().pickedInviteEvent, smmNow().pickedInviteRole);
+    } finally { setBusy(false); }
   };
 
   // ── ЧАТ-СТРАНИЦА — find-or-create the direct dialog and open the fullscreen
@@ -1903,6 +1963,10 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       // page (top panel + bottom docks) — the messages fill the middle, the
       // input sits on its own bar above the library dock. Realtime = the
       // long-poll loop (~1s delivery). Tapping the header peer → profile.
+      // The CUSTOMER's invite row: «Пригласить на мероприятие» above the
+      // input while the deal is not active (no deal / declined / cancelled).
+      const pageDeal = chatMeta[chatPage.chatId]?.deal;
+      const showInviteRow = !isSpecialist && chatPage.peerId && (!pageDeal || pageDeal.status === 'declined' || pageDeal.status === 'cancelled');
       return (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
@@ -1914,11 +1978,20 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           </div>
           {renderDealBar(chatPage.chatId)}
           <div className="desktop-dock desktop-dock-raised shrink-0 z-40 bg-white/95 backdrop-blur-md border-t border-black/10">
-            <div className="max-w-2xl mx-auto px-3 py-2 flex gap-2">
-              <Input value={pageInput} onChange={e => setPageInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPageChat(); } }}
-                placeholder={t('smmChatMessage')} className="h-9 lg:h-10 rounded-full bg-white border-black/15" />
-              <Button size="sm" onClick={sendPageChat} className="h-9 lg:h-10 rounded-full shrink-0"><Send className="w-4 h-4" /></Button>
+            <div className="max-w-2xl mx-auto px-3 py-2 flex flex-col gap-2">
+              {showInviteRow && (
+                <Button size="sm" variant="outline" disabled={busy}
+                  onClick={() => void invitePeerFromChat(chatPage.peerId, chatPage.peerName)}
+                  className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
+                  <Users className="w-3.5 h-3.5" /> {t('smmChatInviteCta')}
+                </Button>
+              )}
+              <div className="flex gap-2">
+                <Input value={pageInput} onChange={e => setPageInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPageChat(); } }}
+                  placeholder={t('smmChatMessage')} className="h-9 lg:h-10 rounded-full bg-white border-black/15" />
+                <Button size="sm" onClick={sendPageChat} className="h-9 lg:h-10 rounded-full shrink-0"><Send className="w-4 h-4" /></Button>
+              </div>
             </div>
           </div>
         </div>
@@ -2173,6 +2246,9 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
       if (topWindow === 'chats') {
         if (openChatId) {
           const chat = chats.find(c => c.id === openChatId);
+          const dlgPeerId = chat?.peer?.id || '';
+          const dlgDeal = chatMeta[openChatId]?.deal;
+          const dlgShowInvite = !isSpecialist && !!dlgPeerId && (!dlgDeal || dlgDeal.status === 'declined' || dlgDeal.status === 'cancelled');
           return (
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
@@ -2184,11 +2260,20 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
               </div>
               {renderDealBar(openChatId)}
               <div className="shrink-0 border-t bg-white/95 backdrop-blur-md px-3 py-2" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-                <div className="max-w-2xl mx-auto flex gap-2">
-                  <Input value={chatInput} onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendChat(); } }}
-                    placeholder={t('smmChatMessage')} className="h-9 rounded-full bg-white border-black/15" />
-                  <Button size="sm" onClick={sendChat} className="h-9 rounded-full shrink-0"><Send className="w-4 h-4" /></Button>
+                <div className="max-w-2xl mx-auto flex flex-col gap-2">
+                  {dlgShowInvite && (
+                    <Button size="sm" variant="outline" disabled={busy}
+                      onClick={() => void invitePeerFromChat(dlgPeerId, chat?.title || '')}
+                      className="h-8 rounded-full border-cta text-cta hover:bg-[#FFF7ED] text-xs">
+                      <Users className="w-3.5 h-3.5" /> {t('smmChatInviteCta')}
+                    </Button>
+                  )}
+                  <div className="flex gap-2">
+                    <Input value={chatInput} onChange={e => setChatInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendChat(); } }}
+                      placeholder={t('smmChatMessage')} className="h-9 rounded-full bg-white border-black/15" />
+                    <Button size="sm" onClick={sendChat} className="h-9 rounded-full shrink-0"><Send className="w-4 h-4" /></Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2447,6 +2532,16 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
             <Button variant="outline" onClick={() => setSearchOpen(true)} className="rounded-full shrink-0 border-black h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10" title={t('searchByTags')} aria-label={t('searchByTags')}>
               <Search className="w-4 h-4" />
             </Button>
+            {/* ФИЛЬТРЫ — the library sort sheet: 6 buttons of the CURRENT
+            surface (events: slots/requests/name — posts&specialists:
+            posts/reviews/name). The active sort highlights the button. */}
+            {!windowTitle && !isAdminUser && (
+              <Button variant="outline" onClick={() => setFiltersOpen(true)}
+                className={`rounded-full shrink-0 h-8 w-8 p-0 sm:h-9 sm:w-9 lg:h-10 lg:w-10 ${sortKey ? 'bg-cta hover:bg-cta/90 text-white border-cta' : 'border-black'}`}
+                title={t('smmFiltersBtn')} aria-label={t('smmFiltersBtn')}>
+                <SlidersHorizontal className="w-4 h-4" />
+              </Button>
+            )}
             {/* ЧЕК-ЛИСТ — the delivery checklist of the accepted deals: the
             specialist submits every slot (link / file), the customer approves
             or declines each one (the slots come from the event editor) */}
@@ -2562,6 +2657,36 @@ export default function SmmDashboard({ profileHandlers }: { profileHandlers?: Pr
           <Button variant="outline" size="icon" className="absolute top-4 right-4 rounded-full bg-white" onClick={() => setImgPreview(null)}>
             <X className="w-4 h-4" />
           </Button>
+        </div>
+      )}
+      {/* ── THE «ФИЛЬТРЫ» SHEET — the всплывающее снизу окно with the 6 sort
+      buttons of the CURRENT library. Tapping the active one clears the sort. */}
+      {filtersOpen && (
+        <div className="fixed inset-0 z-[65] bg-black/40 flex items-end justify-center" onClick={() => setFiltersOpen(false)}>
+          <div className="w-full max-w-2xl bg-white rounded-t-4xl shadow-2xl px-4 pt-4"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3">
+              <SlidersHorizontal className="w-4 h-4 text-cta shrink-0" />
+              <p className="text-base font-bold">{t('smmFiltersBtn')}</p>
+              <Button variant="outline" size="sm" onClick={() => setFiltersOpen(false)} className="ml-auto h-8 w-8 p-0 rounded-full border-black/30" aria-label={t('cancel')}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {sortKeys.map((k, i) => {
+                const active = sortKey === k;
+                return (
+                  <button key={k} type="button"
+                    onClick={() => { useSmmStore.setState({ sortKey: active ? '' : k }); setFiltersOpen(false); }}
+                    className={`h-10 px-4 rounded-full border-2 text-sm font-bold text-left flex items-center gap-2 transition-colors ${active ? 'bg-cta text-white border-cta' : 'bg-white border-black/15 hover:border-black'}`}>
+                    {active && <Check className="w-4 h-4 shrink-0" />}
+                    {sortLabels[i]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
       {/* THE DELETE DIALOG — «Удалить» from any card opens the same

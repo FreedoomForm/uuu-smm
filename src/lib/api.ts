@@ -230,9 +230,9 @@ export const api = {
   // description per role — ONE post per role.
   getPosts: (scope: 'mine' | 'user' = 'mine', userId?: string) =>
     apiFetch(`/smm/posts?scope=${scope}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}`) as Promise<{ items: import('@/lib/app-types').SmmPostT[] }>,
-  createPost: (data: { roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; description: string; media?: unknown; attachments?: unknown; coverColor?: string | null; coverIcon?: string | null }) =>
+  createPost: (data: { roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; description: string; media?: unknown; attachments?: unknown; coverColor?: string | null; coverIcon?: string | null; tags?: string[]; coverUrl?: string | null; tasks?: { label: string; desc: string }[] }) =>
     apiFetch('/smm/posts', { method: 'POST', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmPostT>,
-  updatePost: (id: string, data: { description?: string; media?: unknown; attachments?: unknown; roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; coverColor?: string | null; coverIcon?: string | null; isPublic?: boolean }) =>
+  updatePost: (id: string, data: { description?: string; media?: unknown; attachments?: unknown; roleId?: string; role?: { name: string; pricePerK?: unknown; pricePerDay?: unknown }; coverColor?: string | null; coverIcon?: string | null; isPublic?: boolean; tags?: string[]; coverUrl?: string | null; tasks?: { label: string; desc: string }[] }) =>
     apiFetch(`/smm/posts/${id}`, { method: 'PUT', body: JSON.stringify(data) }) as Promise<import('@/lib/app-types').SmmPostT>,
   deletePost: (id: string) => apiFetch(`/smm/posts/${id}`, { method: 'DELETE' }),
 
@@ -280,7 +280,7 @@ export const api = {
   // Заявки (the specialist applies to an event with one of their roles)
   getApplications: () =>
     apiFetch('/smm/applications') as Promise<{ items: import('@/lib/app-types').SmmRequestRowT[] }>,
-  createApplication: (data: { eventId: string; roleId: string; proofUrl: string; proofNote?: string; score?: number; totalQuestions?: number }) =>
+  createApplication: (data: { eventId: string; roleId: string; proofUrl: string; proofNote?: string; score?: number; totalQuestions?: number; postId?: string }) =>
     apiFetch('/smm/applications', { method: 'POST', body: JSON.stringify(data) }),
   deleteApplication: (id: string) => apiFetch(`/smm/applications/${id}`, { method: 'DELETE' }),
 

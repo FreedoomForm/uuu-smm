@@ -31,7 +31,7 @@ import { tUI } from '@/lib/i18n';
 import { useSessionStore } from '@/stores/session-store';
 import { useNavStore } from '@/stores/nav-store';
 import { useSmmStore } from '@/stores/smm-store';
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Film, Image as ImgIcon, Loader2, MapPin, Paperclip, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Film, Image as ImgIcon, Loader2, MapPin, Paperclip, Plus, Trash2, Users, Tag as TagIcon, ListChecks, Pencil, Minus, Upload } from 'lucide-react';
 import LangButton from '@/components/lang-button';
 import { Collapse } from '@/components/motion';
 import { SMM_PLATFORMS, eventPlatformIcon, eventPlatformLabel, mapEmbedUrl, mediaSrc, fmtMoney, SmmToast } from './smm-bits';
@@ -132,6 +132,175 @@ function EditorFilesSection({ items, onChange, t }: {
   );
 }
 
+// ── THE COLLAPSIBLE SECTION — the SAME one-card pattern the «Прикреплённые
+// файлы» section keeps (header button + Collapse): every creation page wears
+// раскрывающиеся секции — «Ввод», «Теги», «Список задач», «Сколько людей
+// требуется». `defaultOpen` picks the initial state (the input section opens
+// on create, stays folded on edit).
+export function CollapsibleSection({ title, icon, hint, defaultOpen = false, count, children, tone }: {
+  title: string;
+  icon?: React.ReactNode;
+  hint?: string;
+  defaultOpen?: boolean;
+  count?: number;
+  children: React.ReactNode;
+  tone?: 'cta' | 'plain';
+}) {
+  const [expanded, setExpanded] = useState(defaultOpen);
+  return (
+    <Card className={`rounded-4xl border bg-white overflow-hidden ${tone === 'cta' ? 'border-cta/50' : 'border-black'}`}>
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-1.5 px-4 sm:px-6 py-4 text-left hover:bg-muted/50 transition-colors"
+      >
+        {icon}
+        <span className="font-semibold text-base">{title}</span>
+        {count != null && count > 0 && (
+          <span className="h-5 min-w-5 px-1.5 rounded-full bg-cta text-white text-[10px] font-bold flex items-center justify-center">{count}</span>
+        )}
+        {expanded ? (
+          <ChevronDown className="w-4 h-4 ml-auto shrink-0" />
+        ) : (
+          <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
+        )}
+      </button>
+      <Collapse open={expanded} keepMountedOnceShown>
+        <CardContent className="pt-0">
+          {hint && <p className="text-xs text-muted-foreground mb-3">{hint}</p>}
+          {children}
+        </CardContent>
+      </Collapse>
+    </Card>
+  );
+}
+
+// ── ФОТО ОБЛОЖКИ — the cover photo picker of the «Ввод» section: one image,
+// uploaded through the SAME POST /api/attachments/upload every editor uses
+// (tg:/data:/https: storage). The pastel colors stay as the fallback pick.
+export function CoverPhotoPicker({ url, onChange, t }: {
+  url: string | null;
+  onChange: (url: string | null) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const upload = async (file: File) => {
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/attachments/upload', { method: 'POST', body: fd });
+      const j = await res.json();
+      if (!res.ok || !j?.url) throw new Error(j?.error || 'Upload failed');
+      onChange(String(j.url));
+    } catch (e: any) {
+      smmToast(e?.message || 'Error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label className="text-sm font-bold">{t('smmCoverPhoto')}</Label>
+      <div className="flex items-center gap-3">
+        <div className="w-16 h-16 rounded-2xl overflow-hidden border border-black/10 bg-[#FFF0D9] flex items-center justify-center shrink-0">
+          {url
+            ? <img src={mediaSrc(url)} alt="" className="w-full h-full object-cover" />
+            : <ImgIcon className="w-6 h-6 text-cta/60" />}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={`inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-full border-2 border-black text-xs font-bold cursor-pointer ${busy ? 'opacity-60 pointer-events-none' : 'hover:bg-muted/50'}`}>
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} {t('smmCoverUpload')}
+            <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ''; }} />
+          </label>
+          {url && (
+            <button type="button" onClick={() => onChange(null)} className="text-xs font-bold text-destructive text-left">{t('smmCoverRemove')}</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ТЕГИ — the «Теги» section: chips + a type-and-Enter input. Stored as
+// string[] (≤20), the SAME shape the tests keep.
+export function TagsEditor({ tags, onChange, t }: {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const [val, setVal] = useState('');
+  const add = () => {
+    const s = val.trim().slice(0, 40);
+    if (!s) return;
+    if (!tags.some(x => x.toLowerCase() === s.toLowerCase())) onChange([...tags, s].slice(0, 20));
+    setVal('');
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {tags.map((tag, i) => (
+            <span key={i} className="inline-flex items-center gap-1 h-7 pl-2.5 pr-1 rounded-full border border-black/20 bg-muted/50 text-xs font-semibold">
+              {tag}
+              <button type="button" onClick={() => onChange(tags.filter((_, j) => j !== i))}
+                className="w-5 h-5 rounded-full bg-white border border-black/15 flex items-center justify-center" aria-label="remove tag">
+                <Trash2 className="w-3 h-3 text-destructive" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Input value={val} onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          placeholder={t('smmTagsPh')} maxLength={40} className="h-9 rounded-full border-black/20 bg-white text-sm" />
+        <Button type="button" size="sm" variant="outline" onClick={add} disabled={!val.trim()} className="h-9 rounded-full border-black shrink-0"><Plus className="size-3.5" /></Button>
+      </div>
+    </div>
+  );
+}
+
+// ── СПИСОК ЗАДАЧ — the task-card rows: each card = the description of ONE
+// expected result (e.g. «оплата на эту карту — 500 000 сум» + пояснение).
+// On the EVENT the list is created for the SMM specialist when they accept
+// the invitation; on the POST the cards land in the CUSTOMER's task list
+// when they accept the заявка with this post (the deal checklist).
+export function TasksEditor({ items, onChange, t, addLabel }: {
+  items: { label: string; desc: string }[];
+  onChange: (items: { label: string; desc: string }[]) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  addLabel?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">{items.length > 0 ? `${items.length}` : ''}</span>
+        <button type="button" onClick={() => onChange([...items, { label: '', desc: '' }])}
+          className="h-8 px-3 rounded-full bg-cta text-white text-xs font-bold">
+          + {addLabel || t('smmTaskAdd')}
+        </button>
+      </div>
+      {items.map((c, i) => (
+        <div key={i} className="rounded-2xl border border-black/10 p-2.5 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-muted-foreground shrink-0">{i + 1}.</span>
+            <Input value={c.label} onChange={e => onChange(items.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+              placeholder={t('smmTaskLabelPh')} className="h-9 rounded-xl border-black/20 bg-white text-sm" />
+            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))}
+              className="shrink-0 w-8 h-8 rounded-full border border-destructive/40 text-destructive flex items-center justify-center" aria-label="remove">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <Input value={c.desc} onChange={e => onChange(items.map((x, j) => (j === i ? { ...x, desc: e.target.value } : x)))}
+            placeholder={t('smmTaskDescPh')} className="h-9 rounded-xl border-black/10 bg-black/[0.02] text-xs" />
+        </div>
+      ))}
+      {items.length === 0 && <p className="text-[11px] text-muted-foreground text-center py-1">—</p>}
+    </div>
+  );
+}
+
 // ── THE SHARED FORM HANDLES ─────────────────────────────────────────────────
 // The edit window (and the EditorShell footer) triggers the save through the
 // ref: `formRef.current?.save()`.
@@ -170,6 +339,10 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
   // ЧЕК-ЛИСТ СДАЧИ: the delivery slots the specialist must fill on the
   // accepted deal — each slot = WHAT the file/link must be ({ label, desc })
   const [checklist, setChecklist] = useState<{ label: string; desc: string }[]>([]);
+  // СКОЛЬКО ЛЮДЕЙ ТРЕБУЕТСЯ + ТЕГИ + ФОТО ОБЛОЖКИ — the editor's own sections
+  const [peopleRequired, setPeopleRequired] = useState(1);
+  const [tags, setTags] = useState<string[]>([]);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverColor, setCoverColor] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(true);
   // Version rule (the SAME one the tests keep): a VERSION (a copy of somebody
@@ -193,6 +366,9 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
         setLocation(e.location || ''); setTimeAt(e.timeAt || '');
         setTestIds(e.testIds || []); setAttachments(((e as SmmEventT).attachments || []) as AttachmentItem[]);
         setChecklist(Array.isArray((e as any).checklist) ? (e as any).checklist : []);
+        setPeopleRequired(Number((e as any).peopleRequired) > 0 ? Number((e as any).peopleRequired) : 1);
+        setTags(Array.isArray((e as any).tags) ? (e as any).tags : []);
+        setCoverUrl((e as any).coverUrl || null);
         setCoverColor(e.coverColor || null);
         setIsVersion(!!e.parentId);
         setIsPublic(e.isPublic !== false);
@@ -200,6 +376,7 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
     } else {
       setTitle(''); setSummary(''); setCategory('other'); setBarter(''); setBudget(''); setFormat('online'); setPlatform('instagram');
       setLocation(''); setTimeAt(''); setTestIds([]); setAttachments([]); setChecklist([]); setCoverColor(null); setIsPublic(true); setIsVersion(false);
+      setPeopleRequired(1); setTags([]); setCoverUrl(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, myId]);
@@ -208,7 +385,7 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
     if (!title.trim()) { smmToast(t('smmEventTitle')); return; }
     setSaving(true); onSaving?.(true);
     try {
-      const payload = { title, summary, category, barter: category === 'blogger-tour' ? barter : '', budget, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, attachments, coverColor, isPublic, checklist: checklist.filter(c => c.label.trim() || c.desc.trim()) };
+      const payload = { title, summary, category, barter: category === 'blogger-tour' ? barter : '', budget, format, platform: format === 'online' ? platform : '', location: format === 'offline' ? location : '', timeAt, testIds, attachments, coverColor, isPublic, checklist: checklist.filter(c => c.label.trim() || c.desc.trim()), peopleRequired, tags, coverUrl };
       const saved = editingId ? await api.updateEvent(editingId, payload) : await api.createEvent(payload);
       smmToast(t('smmEventSaved'));
       onSaved(saved as SmmEventT);
@@ -225,8 +402,11 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
 
   return (
     <>
-      <Card className="rounded-4xl border border-black bg-white">
-        <CardContent className="p-4 flex flex-col gap-3">
+      {/* ── СЕКЦИЯ ВВОДА (раскрывается/скрывается): фото обложки + название +
+      описание + все факты заказа. Открыта при создании, сложена при правке. */}
+      <CollapsibleSection title={t('smmInputSection')} icon={<Pencil className="w-4 h-4 shrink-0" />} defaultOpen={!editingId}>
+        <div className="flex flex-col gap-3">
+          <CoverPhotoPicker url={coverUrl} onChange={setCoverUrl} t={t} />
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm font-bold">{t('smmEventTitle')}</Label>
             <Input value={title} onChange={e => setTitle(e.target.value)} className="h-10 rounded-2xl border-black/20 bg-white" placeholder={t('smmEventTitle')} />
@@ -293,36 +473,7 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
             <Label className="text-sm font-bold">{t('smmEventTime')}</Label>
             <Input value={timeAt} onChange={e => setTimeAt(e.target.value)} placeholder={t('smmEventTimePh')} className="h-10 rounded-2xl border-black/20 bg-white" />
           </div>
-          {/* ── ЧЕК-ЛИСТ СДАЧИ: the delivery slots the accepted-deal specialist
-          must fill — for EVERY slot the customer describes WHAT the file/link
-          must be (e.g. «скрин отчёта о охватах», «ссылка на reel с рекламой») */}
-          <div className="flex flex-col gap-2 rounded-3xl border-2 border-dashed border-black/20 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <Label className="text-sm font-bold">{t('smmEventChecklistTitle')}</Label>
-              <button type="button" onClick={() => setChecklist(prev => [...prev, { label: '', desc: '' }])}
-                className="h-8 px-3 rounded-full bg-cta text-white text-xs font-bold">
-                + {t('smmEventChecklistAdd')}
-              </button>
-            </div>
-            <p className="text-[11px] text-muted-foreground">{t('smmEventChecklistHint')}</p>
-            {checklist.map((c, i) => (
-              <div key={i} className="rounded-2xl border border-black/10 p-2.5 space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-muted-foreground shrink-0">{i + 1}.</span>
-                  <Input value={c.label} onChange={e => setChecklist(prev => prev.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-                    placeholder={t('smmEventChecklistLabelPh')} className="h-9 rounded-xl border-black/20 bg-white text-sm" />
-                  <button type="button" onClick={() => setChecklist(prev => prev.filter((_, j) => j !== i))}
-                    className="shrink-0 w-8 h-8 rounded-full border border-destructive/40 text-destructive flex items-center justify-center" aria-label="remove">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <Input value={c.desc} onChange={e => setChecklist(prev => prev.map((x, j) => (j === i ? { ...x, desc: e.target.value } : x)))}
-                  placeholder={t('smmEventChecklistDescPh')} className="h-9 rounded-xl border-black/10 bg-black/[0.02] text-xs" />
-              </div>
-            ))}
-            {checklist.length === 0 && <p className="text-[11px] text-muted-foreground text-center py-1">{t('smmEventChecklistEmpty')}</p>}
-          </div>
-          {/* cover */}
+          {/* cover colors stay as the fallback pick under the photo */}
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm font-bold">Cover</Label>
             <div className="flex items-center gap-2 flex-wrap">
@@ -332,20 +483,49 @@ export const SmmEventForm = React.forwardRef<SmmFormHandle, {
               ))}
             </div>
           </div>
-          {/* public — a VERSION can never be public (the test editor's rule:
-          the publish selector is hidden for versions) */}
-          {!isVersion && (
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} className="w-4 h-4 accent-[#F97316]" />
-              <span className="text-sm font-semibold">{t('modeDiscover')} — {t('smmEvents')}</span>
-            </label>
-          )}
-        </CardContent>
-      </Card>
+        </div>
+      </CollapsibleSection>
+
+      {/* ── СКОЛЬКО ЛЮДЕЙ ТРЕБУЕТСЯ — the event-only section: how many
+      specialists the order needs; the card shows «Принято X · Осталось Y» */}
+      <CollapsibleSection title={t('smmPeopleRequired')} icon={<Users className="w-4 h-4 shrink-0 text-cta" />} defaultOpen={!editingId} tone="cta">
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => setPeopleRequired(p => Math.max(1, p - 1))}
+            className="w-10 h-10 rounded-full border-2 border-black/20 flex items-center justify-center hover:border-black" aria-label="-">
+            <Minus className="w-4 h-4" />
+          </button>
+          <span className="text-2xl font-extrabold w-14 text-center">{peopleRequired}</span>
+          <button type="button" onClick={() => setPeopleRequired(p => Math.min(999, p + 1))}
+            className="w-10 h-10 rounded-full border-2 border-black/20 flex items-center justify-center hover:border-black" aria-label="+">
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+      </CollapsibleSection>
+
+      {/* ── ТЕГИ */}
+      <CollapsibleSection title={t('smmTagsSection')} icon={<TagIcon className="w-4 h-4 shrink-0" />} defaultOpen={false} count={tags.length}>
+        <TagsEditor tags={tags} onChange={setTags} t={t} />
+      </CollapsibleSection>
+
+      {/* ── СПИСОК ЗАДАЧ (the delivery checklist, re-labeled): the task cards
+      created FOR the SMM specialist when they accept the invitation — each
+      card describes WHAT to deliver; they fill it on the accepted deal */}
+      <CollapsibleSection title={t('smmTasksSection')} icon={<ListChecks className="w-4 h-4 shrink-0 text-cta" />} hint={t('smmTasksHintEvent')} defaultOpen={false} count={checklist.filter(c => c.label.trim() || c.desc.trim()).length} tone="cta">
+        <TasksEditor items={checklist} onChange={setChecklist} t={t} />
+      </CollapsibleSection>
 
       {/* the «Прикреплённые файлы» section — the SAME one the test editor
       keeps, present on every creation and editing page */}
       <EditorFilesSection items={attachments} onChange={setAttachments} t={t} />
+
+      {/* public — a VERSION can never be public (the test editor's rule:
+      the publish selector is hidden for versions) */}
+      {!isVersion && (
+        <label className="flex items-center gap-2 cursor-pointer select-none px-1">
+          <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} className="w-4 h-4 accent-[#F97316]" />
+          <span className="text-sm font-semibold">{t('modeDiscover')} — {t('smmEvents')}</span>
+        </label>
+      )}
     </>
   );
 });
@@ -394,6 +574,12 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
   const [description, setDescription] = useState('');
   const [media, setMedia] = useState<SmmPostMedia[]>([]);
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  // ТЕГИ + ФОТО ОБЛОЖКИ + ЗАДАЧИ ЗАКАЗЧИКА — the post editor's own sections:
+  // the tasks («Ожидаемые результаты») land in the CUSTOMER's task list when
+  // they accept the заявка sent with this post
+  const [tags, setTags] = useState<string[]>([]);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<{ label: string; desc: string }[]>([]);
   const [mediaUrl, setMediaUrl] = useState('');
   const [mediaType, setMediaType] = useState<'video' | 'image'>('image');
   const [coverColor, setCoverColor] = useState<string | null>(null);
@@ -409,6 +595,9 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
         setDescription(post.description || '');
         setMedia((post.media || []) as SmmPostMedia[]);
         setAttachments((post.attachments || []) as AttachmentItem[]);
+        setTags(Array.isArray((post as any).tags) ? (post as any).tags : []);
+        setCoverUrl((post as any).coverUrl || null);
+        setTasks(Array.isArray((post as any).tasks) ? (post as any).tasks : []);
         setCoverColor(post.coverColor || null);
         if (post.role) {
           setRoleId(post.roleId);
@@ -420,6 +609,7 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
     } else {
       setDescription(''); setMedia([]); setAttachments([]); setCoverColor(null);
       setRoleId(''); setNewRoleName(''); setPricePerK(''); setPricePerDay('');
+      setTags([]); setCoverUrl(null); setTasks([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, myId]);
@@ -455,8 +645,8 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
     setSaving(true); onSaving?.(true);
     try {
       const saved = editingId
-        ? await api.updatePost(editingId, { role, description, media, attachments, coverColor })
-        : await api.createPost({ roleId: roleId || undefined, role, description, media, attachments, coverColor });
+        ? await api.updatePost(editingId, { role, description, media, attachments, coverColor, tags, coverUrl, tasks: tasks.filter(c => c.label.trim() || c.desc.trim()) })
+        : await api.createPost({ roleId: roleId || undefined, role, description, media, attachments, coverColor, tags, coverUrl, tasks: tasks.filter(c => c.label.trim() || c.desc.trim()) });
       smmToast(t('smmPostSaved'));
       onSaved(saved as SmmPostT);
     } catch (e: any) {
@@ -470,9 +660,11 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
 
   return (
     <>
-      {/* role + prices */}
-      <Card className="rounded-4xl border border-black bg-white">
-        <CardContent className="p-4 flex flex-col gap-3">
+      {/* ── СЕКЦИЯ ВВОДА (раскрывается/скрывается): фото обложки + название
+      поста + цены + описание. Открыта при создании, сложена при правке. */}
+      <CollapsibleSection title={t('smmInputSection')} icon={<Pencil className="w-4 h-4 shrink-0" />} defaultOpen={!editingId}>
+        <div className="flex flex-col gap-3">
+          <CoverPhotoPicker url={coverUrl} onChange={setCoverUrl} t={t} />
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm font-bold">{t('smmPostRole')}</Label>
             {roles.length > 0 && !editingId && (
@@ -497,13 +689,16 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
               <Input value={pricePerDay} onChange={e => setPricePerDay(e.target.value)} inputMode="decimal" className="h-9 rounded-2xl border-black/20 bg-white" placeholder={fmtMoney(0)} />
             </div>
           </div>
-        </CardContent>
-      </Card>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-sm font-bold">{t('smmPostDesc')}</Label>
+            <Textarea value={description} onChange={e => setDescription(e.target.value)} rows={4} placeholder={t('smmPostDescPh')} className="rounded-2xl border-black/20 bg-white" />
+          </div>
+        </div>
+      </CollapsibleSection>
 
-      {/* media */}
-      <Card className="rounded-4xl border border-black bg-white">
-        <CardContent className="p-4 flex flex-col gap-3">
-          <Label className="text-sm font-bold">{t('smmPostMedia')}</Label>
+      {/* ── МЕДИА (видео/фото-коллекция) + цвет обложки */}
+      <CollapsibleSection title={t('smmPostMedia')} icon={<Film className="w-4 h-4 shrink-0" />} defaultOpen={false} count={media.length}>
+        <div className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-2">
             {media.map((m, i) => (
               <div key={i} className="relative w-16 h-16 rounded-xl overflow-hidden border border-black/10 bg-[#FFF0D9] flex items-center justify-center group">
@@ -527,17 +722,7 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
             {uploading ? <Loader2 className="w-3.5 h-3.5 inline animate-spin" /> : null} {t('smmPostMediaAdd')} ⤴
             <input type="file" accept="image/*,video/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(f); e.target.value = ''; }} />
           </label>
-        </CardContent>
-      </Card>
-
-      {/* description + cover */}
-      <Card className="rounded-4xl border border-black bg-white">
-        <CardContent className="p-4 flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm font-bold">{t('smmPostDesc')}</Label>
-            <Textarea value={description} onChange={e => setDescription(e.target.value)} rows={4} placeholder={t('smmPostDescPh')} className="rounded-2xl border-black/20 bg-white" />
-          </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5 pt-1">
             <Label className="text-sm font-bold">Cover</Label>
             <div className="flex items-center gap-2 flex-wrap">
               {COVER_COLORS.map(c => (
@@ -546,8 +731,20 @@ export const SmmPostForm = React.forwardRef<SmmFormHandle, {
               ))}
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </CollapsibleSection>
+
+      {/* ── ТЕГИ */}
+      <CollapsibleSection title={t('smmTagsSection')} icon={<TagIcon className="w-4 h-4 shrink-0" />} defaultOpen={false} count={tags.length}>
+        <TagsEditor tags={tags} onChange={setTags} t={t} />
+      </CollapsibleSection>
+
+      {/* ── ОЖИДАЕМЫЕ РЕЗУЛЬТАТЫ (задачи заказчика): the result cards — what
+      the CUSTOMER must do when they accept the заявка with this post (e.g.
+      «оплата на эту карту…» + чек-скрин) */}
+      <CollapsibleSection title={t('smmTasksSection')} icon={<ListChecks className="w-4 h-4 shrink-0 text-cta" />} hint={t('smmTasksHintPost')} defaultOpen={false} count={tasks.filter(c => c.label.trim() || c.desc.trim()).length} tone="cta">
+        <TasksEditor items={tasks} onChange={setTasks} t={t} />
+      </CollapsibleSection>
 
       {/* the «Прикреплённые файлы» section — the SAME one the test editor
       keeps, present on every creation and editing page */}
